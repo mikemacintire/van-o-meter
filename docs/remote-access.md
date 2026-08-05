@@ -41,11 +41,22 @@ tailscale up
 
 Install the Tailscale app on the phone and sign into the same account.
 
-### Remaining step
+### Live setup (completed 2026-08-05)
 
-With Tailscale up, proxy the dashboard onto the tailnet. Verify current syntax
-with `tailscale serve --help` before running — the serve/funnel CLI has changed
-shape across releases, so don't copy a remembered invocation.
+Installed 1.102.2 via winget; this PC is `mikelaptop01` on the tailnet. The
+dashboard is proxied with:
+
+```
+tailscale serve --bg 8642
+```
+
+which serves **https://mikelaptop01.tail3f48d1.ts.net/** (tailnet only) as a
+proxy to `http://127.0.0.1:8642`. Required a one-time "enable Serve" approval
+in the admin console (the CLI prints the link and waits). Verified end to end:
+`/api/live` and the console page both return 200 over the tailnet URL.
+
+Unattended mode is on (`tailscale set --unattended`) so the proxy survives
+logout/reboot. To turn the proxy off: `tailscale serve --https=443 off`.
 
 **Never use `tailscale funnel`.** Funnel publishes to the public internet, which
 is exactly the outcome this document exists to avoid.
