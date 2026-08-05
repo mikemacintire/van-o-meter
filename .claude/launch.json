@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rigspace",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "C:/Users/mikem/.vanometry"],
+      "port": 3000
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeArgs": ["dashboard.py"],
+      "port": 8642
+    }
+  ]
+}

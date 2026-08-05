@@ -1,0 +1,1038 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B0D10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Pod Power Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0B0D10;
+  --surface: #14171C;
+  --surface2: #191D23;
+  --surface3: #1F242B;
+  --line: rgba(255,255,255,.07);
+  --line2: rgba(255,255,255,.13);
+  --ink: #E9ECEF;
+  --muted: #8B95A1;
+  --faint: #5A6470;
+
+  /* validated on --surface: lightness band, chroma, CVD sep, 3:1 contrast */
+  --a: #C9820F;  --a-bright: #F0A82D;   /* Unit A / its solar */
+  --b: #2492BA;  --b-bright: #3FB7E0;   /* Unit B / its solar */
+  --load: #C75D5D; --load-bright: #E07A7A;
+
+  --good: #2FBF71;
+  --warn: #D9A514;
+  --crit: #E5484D;
+
+  --disp: "Chakra Petch", sans-serif;
+  --mono: "IBM Plex Mono", monospace;
+  --r: 12px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+  background-image:
+    radial-gradient(1200px 520px at 78% -12%, rgba(36,146,186,.09), transparent 62%),
+    radial-gradient(950px 440px at 8% -10%, rgba(201,130,15,.08), transparent 62%);
+  background-attachment: fixed;
+}
+body::after {  /* scanline texture */
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 999;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0,0,0,.11) 2px 3px);
+  opacity: .35;
+}
+.wrap { max-width: 1400px; margin: 0 auto; padding: 16px 18px 40px; }
+
+/* ---------- header ---------- */
+header {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line2);
+}
+h1 {
+  font-family: var(--disp); font-size: 18px; font-weight: 700;
+  letter-spacing: .15em; text-transform: uppercase; white-space: nowrap;
+}
+h1 .dim { color: var(--faint); font-weight: 500; }
+.spacer { flex: 1 1 auto; }
+.live { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--good); box-shadow: 0 0 8px var(--good);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.live-dot.stale { background: var(--crit); box-shadow: 0 0 8px var(--crit); animation: none; }
+@keyframes pulse { 50% { opacity: .3; } }
+
+/* segmented controls — sized for touch */
+.seg { display: flex; gap: 2px; background: var(--surface2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
+.seg button {
+  font-family: var(--disp); font-size: 12px; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted); background: none; border: 0;
+  padding: 9px 15px; border-radius: 6px; cursor: pointer; min-height: 40px;
+  transition: background .15s, color .15s;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-selected="true"] { background: var(--surface3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
+.icon-btn {
+  width: 40px; height: 40px; border-radius: 9px; background: var(--surface2);
+  border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+  display: grid; place-items: center; font-size: 15px;
+}
+.icon-btn:hover { color: var(--ink); }
+
+/* settings popover */
+.settings {
+  position: absolute; right: 18px; top: 62px; z-index: 50; display: none;
+  background: var(--surface2); border: 1px solid var(--line2); border-radius: var(--r);
+  padding: 14px; min-width: 230px; box-shadow: 0 14px 40px rgba(0,0,0,.6);
+}
+.settings.open { display: block; }
+.settings h4 {
+  font-family: var(--disp); font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 10px; font-weight: 600;
+}
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 0; }
+.set-row span { color: var(--muted); font-size: 12px; }
+.toggle {
+  width: 44px; height: 25px; border-radius: 999px; background: var(--surface3);
+  border: 1px solid var(--line2); position: relative; cursor: pointer; flex: none;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 19px; height: 19px;
+  border-radius: 50%; background: var(--faint); transition: transform .18s, background .18s;
+}
+.toggle[aria-checked="true"] { background: rgba(47,191,113,.22); border-color: rgba(47,191,113,.5); }
+.toggle[aria-checked="true"]::after { transform: translateX(19px); background: var(--good); }
+.mini-seg { display: flex; gap: 2px; background: var(--surface3); border-radius: 7px; padding: 2px; }
+.mini-seg button {
+  font-family: var(--mono); font-size: 12px; color: var(--muted); background: none;
+  border: 0; padding: 6px 11px; border-radius: 5px; cursor: pointer;
+}
+.mini-seg button[aria-selected="true"] { background: var(--surface); color: var(--ink); }
+
+/* ---------- shared card chrome ---------- */
+.card, .tile, .panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  animation: rise .45s ease-out backwards;
+}
+@keyframes rise { from { opacity: 0; transform: translateY(9px); } }
+.tile { padding: 13px 15px 12px; position: relative; overflow: hidden; }
+.tile .k {
+  font-family: var(--disp); font-size: 11px; font-weight: 600;
+  letter-spacing: .17em; color: var(--muted); text-transform: uppercase;
+}
+.tile .v { font-size: 27px; font-weight: 600; margin-top: 5px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.tile .v small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 3px; }
+.tile .sub { color: var(--faint); font-size: 11px; margin-top: 4px; }
+.meter { height: 4px; background: var(--surface3); border-radius: 2px; margin-top: 9px; overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 2px; transition: width .8s ease; }
+.net-pos { color: var(--good); } .net-neg { color: var(--warn); }
+
+.hero { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 14px 0 10px; }
+.hero .tile:nth-child(2) { animation-delay: .05s; }
+.hero .tile:nth-child(3) { animation-delay: .1s; }
+.hero .tile:nth-child(4) { animation-delay: .15s; }
+
+/* ---------- views ---------- */
+.view { display: none; }
+.view.active { display: block; }
+
+/* ---------- unit cards ---------- */
+.units { display: grid; grid-template-columns: 1fr 92px 1fr; margin-top: 12px; align-items: stretch; }
+.card { padding: 17px; position: relative; overflow: hidden; animation-delay: .18s; }
+.card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+.unit-a::before { background: linear-gradient(var(--a-bright), transparent 85%); }
+.unit-b::before { background: linear-gradient(var(--b-bright), transparent 85%); }
+.card h2 {
+  font-family: var(--disp); font-size: 14px; font-weight: 700; letter-spacing: .15em;
+  text-transform: uppercase; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.card h2 .role { color: var(--faint); font-weight: 500; font-size: 11px; letter-spacing: .09em; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.unit-a .swatch { background: var(--a); } .unit-b .swatch { background: var(--b); }
+
+.card-top { display: flex; gap: 16px; align-items: center; margin-top: 13px; flex-wrap: wrap; }
+.gauge { width: 150px; flex: none; }
+.g-soc { font-size: 30px; font-weight: 600; fill: var(--ink); font-family: var(--mono); }
+.g-pct { font-size: 12px; fill: var(--muted); }
+.g-wh { font-size: 10.5px; fill: var(--faint); font-family: var(--mono); }
+
+.state { display: flex; flex-direction: column; gap: 7px; min-width: 130px; flex: 1; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  border: 1px solid var(--line2); border-radius: 999px; padding: 4px 11px;
+  font-family: var(--disp); font-size: 11px; font-weight: 600; letter-spacing: .13em;
+}
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+.chip.chg { color: var(--good); } .chip.chg .dot { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.chip.dsg { color: var(--warn); } .chip.dsg .dot { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.chip.idle { color: var(--muted); } .chip.idle .dot { background: var(--faint); }
+.eta { color: var(--muted); font-size: 12px; }
+.eta b { color: var(--ink); font-weight: 500; }
+.flows { display: grid; gap: 3px; font-size: 12px; }
+.flows .row { display: flex; justify-content: space-between; gap: 12px; }
+.flows .row span { color: var(--muted); }
+.flows .row b { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); border-radius: 9px;
+  overflow: hidden; margin-top: 14px;
+}
+.cell { background: var(--surface2); padding: 9px 11px; }
+.cell .k { color: var(--faint); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+.cell .v { margin-top: 3px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.cell .v small { color: var(--muted); }
+.packs { display: flex; gap: 8px; margin-top: 11px; flex-wrap: wrap; }
+.pack {
+  border: 1px solid var(--line2); border-radius: 6px; padding: 6px 10px;
+  font-size: 11px; color: var(--muted); display: flex; gap: 9px; align-items: baseline;
+}
+.pack b { color: var(--ink); font-weight: 500; }
+
+.conduit { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+.conduit .lbl {
+  font-family: var(--disp); font-size: 10px; font-weight: 600; letter-spacing: .13em;
+  color: var(--faint); text-transform: uppercase; text-align: center; line-height: 1.5;
+}
+.conduit .w { font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.cond-line { stroke: var(--line2); stroke-width: 2; }
+.cond-line.active { stroke: var(--b-bright); stroke-dasharray: 6 6; animation: flow 1s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -12; } }
+
+/* ---------- panels & charts ---------- */
+.panel { padding: 15px 16px 10px; animation-delay: .22s; margin-top: 10px; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.panel h3 {
+  font-family: var(--disp); font-size: 12px; font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted);
+}
+.panel h3 .note { color: var(--faint); letter-spacing: .04em; text-transform: none; font-weight: 500; }
+.legend { display: flex; gap: 13px; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.legend .ln { width: 13px; height: 2px; border-radius: 1px; vertical-align: 3px; }
+.chart-wrap { position: relative; margin-top: 8px; touch-action: pan-y; }
+.chart-wrap svg { display: block; width: 100%; }
+.tooltip {
+  position: absolute; pointer-events: none; display: none; z-index: 5;
+  background: #1D222A; border: 1px solid var(--line2); border-radius: 7px;
+  padding: 8px 10px; font-size: 11.5px; white-space: nowrap;
+  box-shadow: 0 8px 22px rgba(0,0,0,.55);
+}
+.tooltip .tt-t { color: var(--faint); margin-bottom: 4px; }
+.tooltip .tt-row { display: flex; align-items: center; gap: 7px; line-height: 1.65; }
+.tooltip .tt-row i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.tooltip .tt-row b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.axis { fill: var(--faint); font-size: 10px; font-family: var(--mono); }
+.gridline { stroke: rgba(255,255,255,.05); }
+.empty-note {
+  color: var(--faint); font-size: 12px; padding: 44px 12px; text-align: center; line-height: 1.7;
+}
+.empty-note b { color: var(--muted); font-weight: 500; }
+
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+.sub-head {
+  font-family: var(--disp); font-size: 11px; letter-spacing: .17em; text-transform: uppercase;
+  color: var(--faint); margin: 20px 0 8px; font-weight: 600;
+}
+footer { margin-top: 22px; color: var(--faint); font-size: 11px; text-align: center; line-height: 1.7; }
+
+@media (max-width: 900px) {
+  .units { grid-template-columns: 1fr; }
+  .conduit { flex-direction: row; padding: 12px 0; gap: 12px; }
+  .conduit svg { transform: rotate(90deg); width: 44px; }
+  .two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 780px) {
+  .hero, .stat-row { grid-template-columns: repeat(2, 1fr); }
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  h1 { font-size: 16px; }
+  .wrap { padding: 12px 12px 32px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Pod Power <span class="dim">// Console</span></h1>
+  <div class="seg" role="tablist" id="viewTabs">
+    <button role="tab" data-view="live" aria-selected="true">Live</button>
+    <button role="tab" data-view="power" aria-selected="false">Power</button>
+    <button role="tab" data-view="energy" aria-selected="false">Energy</button>
+    <button role="tab" data-view="system" aria-selected="false">System</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="live"><span class="live-dot" id="liveDot"></span><span id="liveTxt">connecting…</span></div>
+  <button class="icon-btn" id="setBtn" aria-label="Settings">⚙</button>
+</header>
+
+<div class="settings" id="setPanel">
+  <h4>Console settings</h4>
+  <div class="set-row">
+    <span>Temperature</span>
+    <div class="mini-seg" id="unitSeg">
+      <button data-u="F" aria-selected="true">°F</button>
+      <button data-u="C" aria-selected="false">°C</button>
+    </div>
+  </div>
+  <div class="set-row">
+    <span>Keep screen awake</span>
+    <div class="toggle" id="wakeTog" role="switch" aria-checked="false"></div>
+  </div>
+  <div class="set-row">
+    <span>Auto refresh</span>
+    <div class="toggle" id="autoTog" role="switch" aria-checked="true"></div>
+  </div>
+</div>
+
+<!-- ============ LIVE ============ -->
+<section class="view active" id="view-live">
+  <div class="hero">
+    <div class="tile">
+      <div class="k">Bank Stored</div>
+      <div class="v" id="tStored">—</div>
+      <div class="meter"><i id="tStoredBar" style="width:0%"></i></div>
+      <div class="sub" id="tStoredSub"></div>
+    </div>
+    <div class="tile">
+      <div class="k">Solar Now</div>
+      <div class="v" id="tSolar">—</div>
+      <div class="meter"><i id="tSolarBar" style="width:0%;background:var(--a)"></i></div>
+      <div class="sub" id="tSolarSub"></div>
+    </div>
+    <div class="tile">
+      <div class="k">Load Now</div>
+      <div class="v" id="tLoad">—</div>
+      <div class="sub" id="tLoadSub"></div>
+    </div>
+    <div class="tile">
+      <div class="k">Net Flow</div>
+      <div class="v" id="tNet">—</div>
+      <div class="sub" id="tNetSub"></div>
+    </div>
+  </div>
+
+  <div class="units">
+    <div class="card unit-b">
+      <h2><span class="swatch"></span>Unit B <span class="role">donor · standalone</span></h2>
+      <div class="card-top">
+        <svg class="gauge" viewBox="0 0 150 132" id="gaugeB"></svg>
+        <div class="state" id="stateB"></div>
+      </div>
+      <div class="grid" id="gridB"></div>
+      <div class="packs" id="packsB"></div>
+    </div>
+    <div class="conduit">
+      <div class="lbl">B → A<br>transfer</div>
+      <svg width="74" height="26" viewBox="0 0 74 26">
+        <line class="cond-line" id="condLine" x1="2" y1="13" x2="63" y2="13"/>
+        <path id="condArrow" d="M63 6 L72 13 L63 20 Z" fill="var(--line2)"/>
+      </svg>
+      <div class="w" id="condW">idle</div>
+    </div>
+    <div class="card unit-a">
+      <h2><span class="swatch"></span>Unit A <span class="role">house · runs the a/c</span></h2>
+      <div class="card-top">
+        <svg class="gauge" viewBox="0 0 150 132" id="gaugeA"></svg>
+        <div class="state" id="stateA"></div>
+      </div>
+      <div class="grid" id="gridA"></div>
+      <div class="packs" id="packsA"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h3>Today <span class="note">— last 24 hours</span></h3>
+      <div class="legend">
+        <span><i style="background:var(--a)"></i>Solar A</span>
+        <span><i style="background:var(--b)"></i>Solar B</span>
+        <span><i class="ln" style="background:var(--load)"></i>Load</span>
+      </div>
+    </div>
+    <div class="chart-wrap" id="miniPower"></div>
+  </div>
+</section>
+
+<!-- ============ POWER ============ -->
+<section class="view" id="view-power">
+  <div class="panel-head" style="margin:14px 0 4px">
+    <div class="seg" id="rangeTabs" role="tablist">
+      <button role="tab" data-range="24h" aria-selected="true">24 Hours</button>
+      <button role="tab" data-range="7d" aria-selected="false">7 Days</button>
+      <button role="tab" data-range="30d" aria-selected="false">30 Days</button>
+    </div>
+    <div class="live" id="covNote"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h3>Power flow <span class="note" id="powerNote"></span></h3>
+      <div class="legend">
+        <span><i style="background:var(--a)"></i>Solar A</span>
+        <span><i style="background:var(--b)"></i>Solar B</span>
+        <span><i class="ln" style="background:var(--load)"></i>House load</span>
+      </div>
+    </div>
+    <div class="chart-wrap" id="chartPower"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h3>State of charge</h3>
+      <div class="legend">
+        <span><i style="background:var(--a)"></i>Unit A</span>
+        <span><i style="background:var(--b)"></i>Unit B</span>
+      </div>
+    </div>
+    <div class="chart-wrap" id="chartSoc"></div>
+  </div>
+
+  <div class="stat-row" id="powerStats"></div>
+</section>
+
+<!-- ============ ENERGY ============ -->
+<section class="view" id="view-energy">
+  <div class="panel-head" style="margin:14px 0 4px">
+    <div class="seg" id="rangeTabs2" role="tablist">
+      <button role="tab" data-range="24h" aria-selected="true">24 Hours</button>
+      <button role="tab" data-range="7d" aria-selected="false">7 Days</button>
+      <button role="tab" data-range="30d" aria-selected="false">30 Days</button>
+    </div>
+    <div class="live" id="covNote2"></div>
+  </div>
+
+  <div class="stat-row" id="energyStats"></div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h3>Daily energy <span class="note">— harvested vs used</span></h3>
+      <div class="legend">
+        <span><i style="background:var(--a)"></i>Solar A</span>
+        <span><i style="background:var(--b)"></i>Solar B</span>
+        <span><i style="background:var(--load)"></i>Used (AC+DC)</span>
+      </div>
+    </div>
+    <div class="chart-wrap" id="chartDaily"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h3>Typical day <span class="note">— average by hour</span></h3>
+      <div class="legend">
+        <span><i style="background:var(--a)"></i>Solar</span>
+        <span><i class="ln" style="background:var(--load)"></i>Load</span>
+      </div>
+    </div>
+    <div class="chart-wrap" id="chartProfile"></div>
+  </div>
+</section>
+
+<!-- ============ SYSTEM ============ -->
+<section class="view" id="view-system">
+  <div class="sub-head">Lifetime counters</div>
+  <div class="stat-row" id="lifetime"></div>
+  <div class="sub-head">Diagnostics</div>
+  <div class="two-col" id="diag"></div>
+  <div class="sub-head">Logging</div>
+  <div class="stat-row" id="logStats"></div>
+</section>
+
+<footer id="foot"></footer>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = { A: css("--a"), B: css("--b"), load: css("--load"), ink: css("--ink") };
+
+const state = {
+  view: "live", range: "24h", live: null, hist: null,
+  tempUnit: localStorage.getItem("tempUnit") || "F",
+  auto: localStorage.getItem("auto") !== "0",
+  wake: false, lastOk: 0,
+};
+let wakeLock = null;
+
+/* ---------- formatting ---------- */
+const fmtW = w => w == null ? "—" : Math.round(w).toLocaleString() + " W";
+const fmtWh = wh => wh == null ? "—" :
+  Math.abs(wh) >= 1000 ? (wh / 1000).toFixed(Math.abs(wh) >= 10000 ? 1 : 2) + " kWh"
+                       : Math.round(wh) + " Wh";
+function temp(c) {
+  if (c == null) return "—";
+  return state.tempUnit === "F" ? Math.round(c * 9 / 5 + 32) + "°F" : Math.round(c) + "°C";
+}
+function fmtMin(m) {
+  if (!m || m <= 0) return null;
+  const h = Math.floor(m / 60);
+  return h > 0 ? `${h}h ${String(m % 60).padStart(2, "0")}m` : `${m}m`;
+}
+const dayLabel = iso => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
+};
+
+/* ---------- chart core ---------- */
+const NICE = [[1, 4], [1.5, 3], [2, 4], [2.5, 5], [3, 3], [4, 4], [5, 5], [6, 3], [8, 4], [10, 4]];
+function niceTop(vMax, fixed) {
+  if (fixed) return [fixed, 4];
+  const raw = Math.max(10, vMax * 1.12);
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const hit = NICE.find(([m]) => m * pow >= raw) || [10, 4];
+  return [hit[0] * pow, hit[1]];
+}
+function timeFmt(range) {
+  if (range === "24h") return t => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (range === "7d") return t => new Date(t).toLocaleDateString([], { weekday: "short", hour: "numeric" });
+  return t => new Date(t).toLocaleDateString([], { month: "numeric", day: "numeric" });
+}
+function emptyNote(wrap, title, detail) {
+  wrap.innerHTML = `<div class="empty-note"><b>${title}</b><br>${detail}</div>`;
+}
+/** Shared frame: grid, y labels, x labels. Returns scales + svg string parts. */
+function frame(W, H, top, yTicks, xs, xLabels, unitSuffix) {
+  const L = 44, R = 14, T = 12, B = 26;
+  const y = v => T + (H - T - B) * (1 - v / top);
+  let g = "";
+  for (let i = 0; i <= yTicks; i++) {
+    const v = top * i / yTicks, yy = y(v);
+    g += `<line class="gridline" x1="${L}" x2="${W - R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}"/>`
+       + `<text class="axis" x="${L - 7}" y="${(yy + 3.5).toFixed(1)}" text-anchor="end">${v >= 1000 ? (v / 1000) + "k" : Math.round(v)}</text>`;
+  }
+  for (const { x, label } of xLabels) {
+    g += `<text class="axis" x="${x.toFixed(1)}" y="${H - 9}" text-anchor="middle">${label}</text>`;
+  }
+  return { L, R, T, B, y, grid: g };
+}
+function attachTooltip(wrap, svg, hit) {
+  const tt = wrap.querySelector(".tooltip"), xh = wrap.querySelector(".xhair");
+  const move = ev => {
+    const rect = svg.getBoundingClientRect();
+    const pt = ev.touches ? ev.touches[0] : ev;
+    const res = hit((pt.clientX - rect.left) * svg.viewBox.baseVal.width / rect.width);
+    if (!res) { tt.style.display = "none"; if (xh) xh.setAttribute("visibility", "hidden"); return; }
+    if (xh) { xh.setAttribute("visibility", "visible"); xh.setAttribute("x1", res.x); xh.setAttribute("x2", res.x); }
+    tt.innerHTML = res.html;
+    tt.style.display = "block";
+    const px = res.x * rect.width / svg.viewBox.baseVal.width;
+    tt.style.left = Math.max(4, Math.min(px + 14, rect.width - tt.offsetWidth - 4)) + "px";
+    tt.style.top = "8px";
+  };
+  svg.addEventListener("mousemove", move);
+  svg.addEventListener("touchstart", move, { passive: true });
+  svg.addEventListener("touchmove", move, { passive: true });
+  const hide = () => { tt.style.display = "none"; if (xh) xh.setAttribute("visibility", "hidden"); };
+  svg.addEventListener("mouseleave", hide);
+  svg.addEventListener("touchend", hide);
+}
+
+/* ---------- power chart: stacked solar areas + load line ---------- */
+function drawPower(wrap, hist, opts = {}) {
+  const H = opts.height || 210, W = 760;
+  const sa = hist.series.A, sb = hist.series.B;
+  const t = sa.t.length >= sb.t.length ? sa.t : sb.t;
+  if (!t || t.length < 2) {
+    return emptyNote(wrap, "Not enough samples yet",
+      "The poller logs every 30 s — this fills in as data arrives.");
+  }
+  // align B onto A's bucket timeline
+  const bAt = new Map(sb.t.map((tt, i) => [tt, i]));
+  const rows = t.map((tt, i) => {
+    const j = bAt.has(tt) ? bAt.get(tt) : -1;
+    const solA = sa.solar_w[i] ?? 0;
+    const solB = j >= 0 ? (sb.solar_w[j] ?? 0) : 0;
+    const outA = sa.watts_out[i] ?? 0;
+    const outB = j >= 0 ? (sb.watts_out[j] ?? 0) : 0;
+    // B feeding A is internal: don't count it as house load twice
+    const transfer = Math.min(outB, j >= 0 ? (sa.ac_charge_w[i] ?? 0) : 0);
+    return { t: tt, solA, solB, load: Math.max(0, outA + outB - transfer) };
+  });
+  const vMax = Math.max(...rows.map(r => Math.max(r.solA + r.solB, r.load)));
+  const [top, yTicks] = niceTop(vMax);
+  const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
+  const fmt = timeFmt(hist.range);
+
+  const L = 44, R = 14;
+  const x = tt => L + (W - L - R) * (tt - t0) / Math.max(1, t1 - t0);
+  const nLab = Math.min(6, Math.max(2, Math.floor(W / 130)));
+  const xLabels = Array.from({ length: nLab + 1 }, (_, i) => {
+    const tt = t0 + (t1 - t0) * i / nLab;
+    return { x: x(tt), label: fmt(tt) };
+  });
+  const f = frame(W, H, top, yTicks, x, xLabels);
+
+  const area = (key, base) => {
+    const up = rows.map(r => `${x(r.t).toFixed(1)},${f.y(base(r) + r[key]).toFixed(1)}`);
+    const down = rows.map(r => `${x(r.t).toFixed(1)},${f.y(base(r)).toFixed(1)}`).reverse();
+    return `<polygon points="${up.concat(down).join(" ")}"/>`;
+  };
+  const loadLine = rows.map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)} ${f.y(r.load).toFixed(1)}`).join(" ");
+
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">
+    ${f.grid}
+    <g fill="${C.A}" fill-opacity=".55" stroke="${C.A}" stroke-width="1">${area("solA", () => 0)}</g>
+    <g fill="${C.B}" fill-opacity=".55" stroke="${C.B}" stroke-width="1">${area("solB", r => r.solA)}</g>
+    <path d="${loadLine}" fill="none" stroke="${C.load}" stroke-width="2" stroke-linejoin="round"/>
+    <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
+  </svg><div class="tooltip"></div>`;
+
+  const svg = wrap.querySelector("svg");
+  attachTooltip(wrap, svg, mx => {
+    let best = rows[0];
+    for (const r of rows) if (Math.abs(x(r.t) - mx) < Math.abs(x(best.t) - mx)) best = r;
+    return {
+      x: x(best.t),
+      html: `<div class="tt-t">${new Date(best.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>`
+        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar A <b>${Math.round(best.solA)} W</b></div>`
+        + `<div class="tt-row"><i style="background:${C.B}"></i>Solar B <b>${Math.round(best.solB)} W</b></div>`
+        + `<div class="tt-row"><i style="background:${C.load}"></i>Load <b>${Math.round(best.load)} W</b></div>`
+        + `<div class="tt-row" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px">`
+        + `<span style="color:var(--faint)">Net</span><b style="color:${best.solA + best.solB - best.load >= 0 ? css("--good") : css("--warn")}">`
+        + `${best.solA + best.solB - best.load >= 0 ? "+" : "−"}${Math.abs(Math.round(best.solA + best.solB - best.load))} W</b></div>`,
+    };
+  });
+}
+
+/* ---------- SOC chart ---------- */
+function drawSoc(wrap, hist) {
+  const H = 190, W = 760;
+  const pts = {};
+  let any = false;
+  for (const u of ["A", "B"]) {
+    const s = hist.series[u];
+    pts[u] = s.t.map((t, i) => ({ t, v: s.soc[i] })).filter(p => p.v != null);
+    if (pts[u].length) any = true;
+  }
+  if (!any) return emptyNote(wrap, "No state-of-charge samples yet", "Give the poller a few minutes.");
+  const all = [...pts.A, ...pts.B];
+  const t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(...all.map(p => p.t)) || t0 + 1;
+  const L = 44, R = 14;
+  const x = t => L + (W - L - R) * (t - t0) / Math.max(1, t1 - t0);
+  const fmt = timeFmt(hist.range);
+  const nLab = 5;
+  const xLabels = Array.from({ length: nLab + 1 }, (_, i) => {
+    const t = t0 + (t1 - t0) * i / nLab;
+    return { x: x(t), label: fmt(t) };
+  });
+  const f = frame(W, H, 100, 4, x, xLabels);
+  let lines = "", ends = "";
+  for (const u of ["A", "B"]) {
+    if (!pts[u].length) continue;
+    const d = pts[u].map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${f.y(p.v).toFixed(1)}`).join(" ");
+    const last = pts[u][pts[u].length - 1];
+    lines += `<path d="${d}" fill="none" stroke="${C[u]}" stroke-width="2" stroke-linejoin="round"/>`;
+    ends += `<circle cx="${x(last.t).toFixed(1)}" cy="${f.y(last.v).toFixed(1)}" r="3.5" fill="${C[u]}" stroke="var(--surface)" stroke-width="2"/>`;
+  }
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">
+    ${f.grid}${lines}${ends}
+    <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
+  </svg><div class="tooltip"></div>`;
+  attachTooltip(wrap, wrap.querySelector("svg"), mx => {
+    let rows = "", tx = null;
+    for (const u of ["A", "B"]) {
+      if (!pts[u].length) continue;
+      let best = pts[u][0];
+      for (const p of pts[u]) if (Math.abs(x(p.t) - mx) < Math.abs(x(best.t) - mx)) best = p;
+      tx = tx ?? best.t;
+      rows += `<div class="tt-row"><i style="background:${C[u]}"></i>Unit ${u} <b>${best.v.toFixed(1)}%</b></div>`;
+    }
+    return rows ? { x: x(tx), html: `<div class="tt-t">${new Date(tx).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>${rows}` } : null;
+  });
+}
+
+/* ---------- daily energy bars ---------- */
+function drawDaily(wrap, hist) {
+  const dA = hist.daily.A, dB = hist.daily.B;
+  const days = [...new Set([...dA.map(d => d.date), ...dB.map(d => d.date)])].sort();
+  if (!days.length) {
+    return emptyNote(wrap, "No completed energy readings yet",
+      "Daily totals come from the battery's lifetime Wh counters — the first full day appears once logging spans one.");
+  }
+  const byA = Object.fromEntries(dA.map(d => [d.date, d])), byB = Object.fromEntries(dB.map(d => [d.date, d]));
+  const rows = days.map(date => {
+    const a = byA[date] || {}, b = byB[date] || {};
+    return {
+      date,
+      solA: a.solar_wh || 0, solB: b.solar_wh || 0,
+      used: (a.ac_out_wh || 0) + (a.dc_out_wh || 0) + (b.ac_out_wh || 0) + (b.dc_out_wh || 0),
+    };
+  });
+  const H = 220, W = 760, L = 44, R = 14, T = 12, B = 30;
+  const vMax = Math.max(...rows.map(r => Math.max(r.solA + r.solB, r.used)), 100);
+  const [top, yTicks] = niceTop(vMax);
+  const slot = (W - L - R) / rows.length;
+  const barW = Math.min(34, slot * 0.34);
+  const gap = 3;
+  const xLabels = rows.map((r, i) => ({ x: L + slot * (i + 0.5), label: dayLabel(r.date) }));
+  const f = frame(W, H, top, yTicks, null, rows.length <= 10 ? xLabels : xLabels.filter((_, i) => i % Math.ceil(rows.length / 8) === 0));
+
+  const rect = (x, v0, v1, fill, round) => {
+    const y1 = f.y(v1), y0 = f.y(v0), h = Math.max(0, y0 - y1);
+    if (h < 0.5) return "";
+    const r = round ? Math.min(4, h / 2, barW / 2) : 0;
+    return `<rect x="${x.toFixed(1)}" y="${y1.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="${r}" fill="${fill}"/>`;
+  };
+  let bars = "";
+  rows.forEach((r, i) => {
+    const cx = L + slot * (i + 0.5);
+    const xh = cx - barW - gap / 2, xu = cx + gap / 2;
+    bars += rect(xh, 0, r.solA, C.A, r.solB < 1);
+    if (r.solB > 0) bars += rect(xh, r.solA + top * 0.004, r.solA + r.solB, C.B, true); // 2px surface gap
+    bars += rect(xu, 0, r.used, C.load, true);
+  });
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">${f.grid}${bars}</svg><div class="tooltip"></div>`;
+  attachTooltip(wrap, wrap.querySelector("svg"), mx => {
+    const i = Math.floor((mx - L) / slot);
+    if (i < 0 || i >= rows.length) return null;
+    const r = rows[i], harvest = r.solA + r.solB, net = harvest - r.used;
+    return {
+      x: L + slot * (i + 0.5),
+      html: `<div class="tt-t">${dayLabel(r.date)}</div>`
+        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar A <b>${fmtWh(r.solA)}</b></div>`
+        + `<div class="tt-row"><i style="background:${C.B}"></i>Solar B <b>${fmtWh(r.solB)}</b></div>`
+        + `<div class="tt-row"><i style="background:${C.load}"></i>Used <b>${fmtWh(r.used)}</b></div>`
+        + `<div class="tt-row" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px">`
+        + `<span style="color:var(--faint)">Net</span><b style="color:${net >= 0 ? css("--good") : css("--warn")}">${net >= 0 ? "+" : "−"}${fmtWh(Math.abs(net))}</b></div>`,
+    };
+  });
+}
+
+/* ---------- hourly profile ---------- */
+function drawProfile(wrap, hist) {
+  const pa = hist.profile.A, pb = hist.profile.B;
+  const rows = pa.map((h, i) => ({
+    hour: h.hour,
+    solar: (h.solar_w || 0) + (pb[i]?.solar_w || 0),
+    load: (h.load_w || 0) + (pb[i]?.load_w || 0),
+  }));
+  if (!rows.some(r => r.solar || r.load)) {
+    return emptyNote(wrap, "No hourly shape yet", "This averages each hour of the day across the selected range.");
+  }
+  const H = 200, W = 760, L = 44, R = 14;
+  const vMax = Math.max(...rows.map(r => Math.max(r.solar, r.load)), 50);
+  const [top, yTicks] = niceTop(vMax);
+  const slot = (W - L - R) / 24;
+  const barW = Math.min(20, slot * 0.62);
+  const xLabels = rows.filter(r => r.hour % 3 === 0)
+    .map(r => ({ x: L + slot * (r.hour + 0.5), label: (r.hour % 12 || 12) + (r.hour < 12 ? "a" : "p") }));
+  const f = frame(W, H, top, yTicks, null, xLabels);
+  let bars = "", line = "";
+  rows.forEach(r => {
+    const cx = L + slot * (r.hour + 0.5);
+    const y1 = f.y(r.solar), h = Math.max(0, f.y(0) - y1);
+    if (h > 0.5) bars += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="${Math.min(4, h / 2)}" fill="${C.A}" fill-opacity=".85"/>`;
+    line += `${r.hour ? "L" : "M"}${cx.toFixed(1)} ${f.y(r.load).toFixed(1)}`;
+  });
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">${f.grid}${bars}
+    <path d="${line}" fill="none" stroke="${C.load}" stroke-width="2" stroke-linejoin="round"/>
+    <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
+  </svg><div class="tooltip"></div>`;
+  attachTooltip(wrap, wrap.querySelector("svg"), mx => {
+    const i = Math.floor((mx - L) / slot);
+    if (i < 0 || i > 23) return null;
+    const r = rows[i];
+    const h12 = (r.hour % 12 || 12) + (r.hour < 12 ? " AM" : " PM");
+    return {
+      x: L + slot * (i + 0.5),
+      html: `<div class="tt-t">${h12} average</div>`
+        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar <b>${Math.round(r.solar)} W</b></div>`
+        + `<div class="tt-row"><i style="background:${C.load}"></i>Load <b>${Math.round(r.load)} W</b></div>`,
+    };
+  });
+}
+
+/* ---------- gauge ---------- */
+function polar(cx, cy, r, deg) {
+  const a = (deg - 90) * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+function arcPath(cx, cy, r, a0, a1) {
+  const [x0, y0] = polar(cx, cy, r, a0), [x1, y1] = polar(cx, cy, r, a1);
+  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+function renderGauge(svg, unit, u) {
+  const soc = u.soc ?? 0;
+  const color = soc < 10 ? css("--crit") : soc < 25 ? css("--warn") : C[unit];
+  const A0 = -122, A1 = 122;
+  const fill = A0 + (A1 - A0) * Math.min(Math.max(soc, 0), 100) / 100;
+  svg.innerHTML = `
+    <path d="${arcPath(75, 75, 62, A0, A1)}" fill="none" stroke="var(--surface3)" stroke-width="9" stroke-linecap="round"/>
+    ${soc > 0.4 ? `<path d="${arcPath(75, 75, 62, A0, fill)}" fill="none" stroke="${color}" stroke-width="9"
+      stroke-linecap="round" style="filter:drop-shadow(0 0 6px ${color}55)"/>` : ""}
+    <text class="g-soc" x="75" y="72" text-anchor="middle">${u.soc == null ? "—" : u.soc.toFixed(1)}<tspan class="g-pct">%</tspan></text>
+    <text class="g-wh" x="75" y="91" text-anchor="middle">${fmtWh(u.wh_est)} of ${fmtWh(u.wh_full)}</text>`;
+}
+
+/* ---------- live rendering ---------- */
+function transferW(A, B) { return Math.min(B.ac.out_w ?? 0, A.ac.in_w ?? 0); }
+
+function stateChip(u) {
+  const charging = (u.in_w ?? 0) > 5;
+  const net = (u.in_w ?? 0) - (u.out_w ?? 0);
+  if (charging && net > 5) {
+    const eta = fmtMin(u.chg_remain_min);
+    return `<span class="chip chg"><span class="dot"></span>Charging</span>` + (eta ? `<span class="eta">full in <b>${eta}</b></span>` : "");
+  }
+  if ((u.out_w ?? 0) > 5) {
+    const eta = fmtMin(u.dsg_remain_min);
+    return `<span class="chip dsg"><span class="dot"></span>Discharging</span>` + (eta ? `<span class="eta">empty in <b>${eta}</b></span>` : "");
+  }
+  return `<span class="chip idle"><span class="dot"></span>Idle</span>`;
+}
+const cell = (k, v) => `<div class="cell"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+
+function renderUnit(unit, u) {
+  renderGauge($("gauge" + unit), unit, u);
+  $("state" + unit).innerHTML = stateChip(u) + `
+    <div class="flows">
+      <div class="row"><span>solar in</span><b>${fmtW(u.solar.w)}</b></div>
+      <div class="row"><span>ac in</span><b>${fmtW(u.ac.in_w)}</b></div>
+      <div class="row"><span>total out</span><b>${fmtW(u.out_w)}</b></div>
+    </div>`;
+  const s = u.solar, ac = u.ac, p0 = u.packs[0];
+  $("grid" + unit).innerHTML =
+    cell("PV Array", s.v ? `${s.v.toFixed(1)} V <small>· ${s.a.toFixed(2)} A</small>` : "<small>no sun</small>") +
+    cell("AC Output", ac.out_enabled ? `${fmtW(ac.out_w)} <small>· on${ac.xboost ? " +xb" : ""}</small>` : "<small>off</small>") +
+    cell("DC / USB", fmtW((u.dc.car_w ?? 0) + (u.dc.usb_w ?? 0))) +
+    cell("Batt Temp", p0 ? `${temp(p0.temp)} <small>· cells ${temp(p0.cell_temp_min)}–${temp(p0.cell_temp_max)}</small>` : "—") +
+    cell("MPPT / Inv", `${temp(s.temp)} <small>/ ${temp(ac.temp)}</small>`) +
+    cell("Fan", u.fan_level ? `level ${u.fan_level}` : "<small>off</small>");
+  $("packs" + unit).innerHTML = u.packs.map(p =>
+    `<div class="pack"><b>${p.name}</b><span>${p.soc?.toFixed(1)}%</span><span>${p.vol?.toFixed(1)} V</span><span>${fmtWh(p.wh_est)}</span></div>`
+  ).join("");
+}
+
+function renderLive(d) {
+  const A = d.units.A, B = d.units.B;
+  if (A.error || B.error) throw new Error(A.error || B.error);
+
+  const stored = A.wh_est + B.wh_est, full = A.wh_full + B.wh_full;
+  const pct = full ? 100 * stored / full : 0;
+  $("tStored").innerHTML = `${pct.toFixed(0)}<small>%</small>`;
+  $("tStoredBar").style.width = pct.toFixed(1) + "%";
+  $("tStoredBar").style.background = pct < 15 ? css("--crit") : pct < 40 ? css("--warn") : css("--good");
+  $("tStoredSub").textContent = `${fmtWh(stored)} of ${fmtWh(full)} · A ${A.soc?.toFixed(0)}% · B ${B.soc?.toFixed(0)}%`;
+
+  const solar = (A.solar.w ?? 0) + (B.solar.w ?? 0);
+  $("tSolar").innerHTML = `${Math.round(solar)}<small>W</small>`;
+  $("tSolarBar").style.width = Math.min(100, solar / 24).toFixed(1) + "%";
+  $("tSolarSub").textContent = `A ${Math.round(A.solar.w ?? 0)} · B ${Math.round(B.solar.w ?? 0)} W · of 2400 W`;
+
+  const transfer = transferW(A, B);
+  const load = Math.max(0, (A.out_w ?? 0) + (B.out_w ?? 0) - transfer);
+  $("tLoad").innerHTML = `${Math.round(load)}<small>W</small>`;
+  $("tLoadSub").textContent = A.ac.out_enabled
+    ? `a/c inverter on · ${fmtW(A.ac.out_w)}` : "a/c inverter off";
+
+  const wall = (A.ac.in_w ?? 0) + (B.ac.in_w ?? 0) - transfer;
+  const net = solar + Math.max(0, wall) - load;
+  $("tNet").innerHTML = `<span class="${net >= 0 ? "net-pos" : "net-neg"}">${net >= 0 ? "+" : "−"}${Math.abs(Math.round(net))}<small>W</small></span>`;
+  $("tNetSub").textContent = net >= 0
+    ? (wall > 5 ? "filling (wall + sun)" : "filling on solar")
+    : `drawing down · ${fmtMin(A.dsg_remain_min) || "—"} left on A`;
+
+  renderUnit("A", A); renderUnit("B", B);
+
+  const active = transfer > 5;
+  $("condLine").classList.toggle("active", active);
+  $("condArrow").setAttribute("fill", active ? css("--b-bright") : css("--line2"));
+  $("condW").textContent = active ? fmtW(transfer) : "idle";
+
+  // system view
+  const lt = (k, v, sub) => `<div class="tile"><div class="k">${k}</div><div class="v">${fmtWh(v)}</div><div class="sub">${sub}</div></div>`;
+  $("lifetime").innerHTML =
+    lt("Solar harvested", A.lifetime_wh.solar_in + B.lifetime_wh.solar_in, `A ${fmtWh(A.lifetime_wh.solar_in)} · B ${fmtWh(B.lifetime_wh.solar_in)}`) +
+    lt("Wall power in", A.lifetime_wh.ac_in + B.lifetime_wh.ac_in, "the extension-cord habit") +
+    lt("AC delivered", A.lifetime_wh.ac_out + B.lifetime_wh.ac_out, "lifetime inverter output") +
+    lt("DC delivered", A.lifetime_wh.dc_out + B.lifetime_wh.dc_out, "12 V + USB");
+
+  $("diag").innerHTML = ["A", "B"].map(un => {
+    const u = d.units[un];
+    return `<div class="panel" style="margin-top:0"><div class="panel-head"><h3>Unit ${un}</h3></div>
+      <div class="grid" style="grid-template-columns:repeat(2,1fr)">
+        ${cell("Cycles", u.packs.map(p => p.cycles).join(" / "))}
+        ${cell("Health", u.packs.map(p => p.soh + "%").join(" / "))}
+        ${cell("Cell spread", u.packs.map(p => "Δ" + p.cell_spread_mv + " mV").join(" / "))}
+        ${cell("Pack voltage", u.packs.map(p => p.vol?.toFixed(1) + " V").join(" / "))}
+        ${cell("Charge limits", `${u.limits.min_dsg_soc}–${u.limits.max_chg_soc}%`)}
+        ${cell("AC charge cap", fmtW(u.ac.slow_chg_w))}
+        ${cell("MPPT temp", temp(u.solar.temp))}
+        ${cell("Inverter temp", temp(u.ac.temp))}
+      </div></div>`;
+  }).join("");
+}
+
+/* ---------- history rendering ---------- */
+function statTile(k, v, sub) { return `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="sub">${sub || ""}</div></div>`; }
+
+/** The A/C column started logging later than the rest, so say what window this covers. */
+function dutySub(s) {
+  if (s.ac_duty_pct == null) return "no inverter samples yet";
+  const span = s.ac_span_min || 0;
+  const win = span < 90 ? `${span} min` : span < 1440 ? `${(span / 60).toFixed(1)} h` : `${Math.round(span / 1440)} d`;
+  const avg = s.ac_avg_when_on ? `${Math.round(s.ac_avg_when_on)} W running · ` : "";
+  return `${avg}over ${win} logged`;
+}
+
+function renderHistory(h) {
+  const label = { "24h": "last 24 hours", "7d": "last 7 days", "30d": "last 30 days" }[h.range];
+  $("powerNote").textContent = "— " + label;
+
+  drawPower($("miniPower"), h.range === "24h" ? h : (state.hist24 || h), { height: 168 });
+  drawPower($("chartPower"), h);
+  drawSoc($("chartSoc"), h);
+  drawDaily($("chartDaily"), h);
+  drawProfile($("chartProfile"), h);
+
+  const sA = h.stats.A, sB = h.stats.B;
+  const cov = h.coverage.first ? new Date(h.coverage.first) : null;
+  const covTxt = cov
+    ? `logging since ${cov.toLocaleDateString([], { month: "short", day: "numeric" })} ${cov.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${h.coverage.samples.toLocaleString()} samples`
+    : "no samples yet";
+  $("covNote").textContent = covTxt;
+  $("covNote2").textContent = covTxt;
+
+  $("powerStats").innerHTML = sA ? [
+    statTile("Peak solar · A", (sA.peak_solar_w ?? 0) + " W",
+      sA.peak_solar_at ? "at " + new Date(sA.peak_solar_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
+    statTile("Peak solar · B", (sB?.peak_solar_w ?? 0) + " W",
+      sB?.peak_solar_at ? "at " + new Date(sB.peak_solar_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
+    statTile("A/C duty cycle", sA.ac_duty_pct == null ? "—" : sA.ac_duty_pct + "%",
+      dutySub(sA)),
+    statTile("SOC swing · A", sA.soc_min == null ? "—" : `${Math.round(sA.soc_min)}–${Math.round(sA.soc_max)}%`, label),
+  ].join("") : "";
+
+  // energy stats from daily rollups
+  const dA = h.daily.A, dB = h.daily.B;
+  const byDate = {};
+  for (const d of dA) byDate[d.date] = { solar: d.solar_wh, used: d.ac_out_wh + d.dc_out_wh, wall: d.ac_in_wh };
+  for (const d of dB) {
+    const e = byDate[d.date] || (byDate[d.date] = { solar: 0, used: 0, wall: 0 });
+    e.solar += d.solar_wh; e.used += d.ac_out_wh + d.dc_out_wh; e.wall += d.ac_in_wh;
+  }
+  const days = Object.entries(byDate).sort();
+  if (!days.length) {
+    $("energyStats").innerHTML = statTile("Daily energy", "—", "waiting for the first full day of counter data");
+  } else {
+    const n = days.length;
+    const sum = k => days.reduce((a, [, v]) => a + v[k], 0);
+    const best = days.reduce((a, b) => (b[1].solar > a[1].solar ? b : a));
+    $("energyStats").innerHTML = [
+      statTile("Avg harvest / day", fmtWh(sum("solar") / n), `over ${n} day${n > 1 ? "s" : ""} logged`),
+      statTile("Avg used / day", fmtWh(sum("used") / n), "AC + DC output"),
+      statTile("Best solar day", fmtWh(best[1].solar), dayLabel(best[0])),
+      statTile("Wall power used", fmtWh(sum("wall")), "grid top-ups in range"),
+    ].join("");
+  }
+
+  $("logStats").innerHTML = [
+    statTile("Samples logged", h.coverage.samples.toLocaleString(), "both units, every 30 s"),
+    statTile("Logging since", cov ? cov.toLocaleDateString([], { month: "short", day: "numeric" }) : "—",
+      cov ? cov.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
+    statTile("Days covered", days.length || "—", "with energy counters"),
+    statTile("Bucket size", (h.bucket_s / 60) + " min", "chart resolution at this range"),
+  ].join("");
+}
+
+/* ---------- data plumbing ---------- */
+async function refreshLive() {
+  try {
+    const d = await (await fetch("/api/live")).json();
+    renderLive(d);
+    state.live = d; state.lastOk = Date.now();
+  } catch (e) { console.error("live refresh failed:", e); }
+  const stale = Date.now() - state.lastOk > 45000;
+  $("liveDot").classList.toggle("stale", stale);
+  $("liveTxt").textContent = state.lastOk === 0 ? "connecting…"
+    : stale ? "signal lost — retrying" : "live · " + new Date(state.lastOk).toLocaleTimeString();
+}
+async function refreshHistory() {
+  try {
+    const h = await (await fetch("/api/history?range=" + state.range)).json();
+    if (h.error) throw new Error(h.error);
+    state.hist = h;
+    if (h.range === "24h") state.hist24 = h;
+    renderHistory(h);
+  } catch (e) { console.error("history refresh failed:", e); }
+}
+
+/* ---------- controls ---------- */
+function setView(v) {
+  state.view = v;
+  document.querySelectorAll(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
+  document.querySelectorAll("#viewTabs button").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === v)));
+}
+function setRange(r) {
+  state.range = r;
+  document.querySelectorAll("#rangeTabs button, #rangeTabs2 button")
+    .forEach(b => b.setAttribute("aria-selected", String(b.dataset.range === r)));
+  refreshHistory();
+}
+$("viewTabs").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (b) setView(b.dataset.view);
+});
+for (const id of ["rangeTabs", "rangeTabs2"]) {
+  $(id).addEventListener("click", e => {
+    const b = e.target.closest("button"); if (b) setRange(b.dataset.range);
+  });
+}
+$("setBtn").addEventListener("click", e => { e.stopPropagation(); $("setPanel").classList.toggle("open"); });
+document.addEventListener("click", e => {
+  if (!$("setPanel").contains(e.target)) $("setPanel").classList.remove("open");
+});
+$("unitSeg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.tempUnit = b.dataset.u;
+  localStorage.setItem("tempUnit", state.tempUnit);
+  document.querySelectorAll("#unitSeg button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
+  if (state.live) renderLive(state.live);
+});
+async function setWake(on) {
+  state.wake = on;
+  $("wakeTog").setAttribute("aria-checked", String(on));
+  try {
+    if (on && "wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+    else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (err) { console.warn("wake lock unavailable:", err.message); }
+}
+$("wakeTog").addEventListener("click", () => setWake(!state.wake));
+document.addEventListener("visibilitychange", () => {
+  if (state.wake && !wakeLock && document.visibilityState === "visible") setWake(true);
+});
+$("autoTog").addEventListener("click", () => {
+  state.auto = !state.auto;
+  localStorage.setItem("auto", state.auto ? "1" : "0");
+  $("autoTog").setAttribute("aria-checked", String(state.auto));
+});
+
+/* ---------- boot ---------- */
+document.querySelectorAll("#unitSeg button")
+  .forEach(b => b.setAttribute("aria-selected", String(b.dataset.u === state.tempUnit)));
+$("autoTog").setAttribute("aria-checked", String(state.auto));
+$("foot").innerHTML = "read-only console · live state cached 10 s · history from <code>data/samples.csv</code><br>"
+  + "EcoFlow's API has no historical endpoint — every chart here is built from samples this poller logged.";
+
+refreshLive();
+refreshHistory();
+setInterval(() => { if (state.auto) refreshLive(); }, 15000);
+setInterval(() => { if (state.auto) refreshHistory(); }, 60000);
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => state.hist && renderHistory(state.hist), 250); });
+</script>
+</body>
+</html>

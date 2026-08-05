@@ -1,0 +1,2524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070A0F">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Pod Power Console</title>
+<link rel="stylesheet" href="/assets/fonts.css">
+<!-- inline so a tablet with no internet still gets an icon, and so the console
+     stops requesting a /favicon.ico that was never there -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23070A0F'/%3E%3Cpath d='M18 5 L9 18h6l-1.5 9 9-13h-6z' fill='%234FB3E8'/%3E%3C/svg%3E">
+<style>
+/* ============================================================================
+   Pod Power Console — see DESIGN.md for the system this implements.
+   The world: a lit instrument in a dark truck. The rig's neon outline is the one
+   bright object; light means energized. Nothing glows for decoration.
+   ========================================================================== */
+:root {
+  --bg: #070A0F;
+  --surface: #10151D;
+  --surface2: #151B24;
+  --surface3: #1C232E;
+  --line: rgba(255,255,255,.06);
+  --line2: rgba(255,255,255,.12);
+  --line3: rgba(255,255,255,.20);
+  --ink: #E8EDF4;
+  --muted: #8794A5;
+  --faint: #5A6675;
+
+  /* Data series. Validated for the dark surface with the dataviz checker:
+     OKLCH lightness band, chroma floor, adjacent CVD separation (worst pair
+     ΔE 14.8 protan), normal-vision floor, and 3:1 contrast — all pass.
+     Do not retune without re-running that check.
+     The -bright steps are for glow and hover only, never for fills. */
+  --a: #C9820F;    --a-bright: #F0A82D;   /* Unit A / its array */
+  --b: #2492BA;    --b-bright: #3FB7E0;   /* Unit B / its array */
+  --load: #C75D5D; --load-bright: #E07A7A;
+  --xfer: #4FD1C5;                        /* B→A transfer series */
+
+  /* Status — reserved, never reused as a series colour. */
+  --good: #3ED88A;
+  --warn: #E3B341;
+  --crit: #F0555A;
+
+  /* Chrome accent: the truck's own blue, sampled off the outline (#38A2DE core,
+     #6CC2F0 highlight) so the interface and the centrepiece read as one object.
+     Nav, focus, selection and slider thumbs only — it carries no data identity,
+     which is why the transfer series moved out to --xfer. */
+  --accent: #4FB3E8;
+  --accent-dim: #2E7FAE;
+
+  --tint-a: rgba(240,168,45,.12);
+  --tint-b: rgba(63,183,224,.12);
+  --tint-load: rgba(224,122,122,.12);
+  --tint-good: rgba(62,216,138,.12);
+  --tint-warn: rgba(227,179,65,.12);
+  --tint-crit: rgba(240,85,90,.12);
+  --tint-accent: rgba(79,179,232,.13);
+
+  /* Type. One superfamily, two faces (Oxanium retired 2026-08-05). Mono is for
+     measurement, never for prose — any sentence a human reads is --sans.
+     --disp survives as a role token: labels/headings, heavier and tracked. */
+  --disp: "IBM Plex Sans", system-ui, sans-serif;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Near scale — every view but Overview. Read at arm's length on a tablet.
+     Nothing below 12px, anywhere. */
+  --t-micro: 12px;   /* uppercase micro-labels */
+  --t-xs:    13px;   /* dense grid values, chart axis */
+  --t-sm:    14px;   /* secondary text, hints, subs */
+  --t-base:  15px;   /* body prose */
+  --t-md:    17px;
+  --t-lg:    20px;
+  --t-xl:    26px;
+  --t-2xl:   34px;
+
+  /* Far scale — Overview only. Viewport-height clamps, because this screen is a
+     wall display read from 6-10 ft and must fill exactly one screen at any size.
+     The deliberate exception to the fixed-scale rule. Floor 14px: if it can't be
+     read at 14px from across the box, it doesn't belong on Overview. */
+  --f-label: clamp(14px, 1.6vh, 19px);
+  --f-sub:   clamp(14px, 1.5vh, 18px);
+  --f-val:   clamp(26px, 3.6vh, 46px);
+  --f-hero:  clamp(56px, 9vh, 116px);
+
+  /* Elevation is neutral, with offset and blur. Distinct from the energized
+     glow, which is a zero-offset colour halo and means "carrying power now". */
+  --e1: 0 1px 2px rgba(0,0,0,.4);
+  --e2: 0 6px 18px rgba(0,0,0,.5);
+  --e3: 0 20px 48px rgba(0,0,0,.65);
+
+  --r: 14px;
+  --r-sm: 10px;
+  --r-lg: 18px;
+  --rail: 72px;
+  --rail-open: 208px;
+  --ease: cubic-bezier(.2,.7,.3,1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--t-base);
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+  background-image:
+    radial-gradient(1100px 560px at 82% -14%, rgba(36,146,186,.10), transparent 64%),
+    radial-gradient(880px 460px at 4% -8%, rgba(79,179,232,.05), transparent 62%);
+  background-attachment: fixed;
+}
+/* Every quantity is mono + tabular so columns of numbers line up and a changing
+   digit doesn't reflow the row it sits in. */
+.num, .v, .big, .ctl-val, .cell .v, .flows b, .pack b, .pack span, .eta b {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+}
+
+/* One focus ring, on everything. There was none before this pass. */
+:where(button, [role="switch"], [role="tab"], input, summary, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ================= app shell ================= */
+.app { display: grid; grid-template-columns: var(--rail) minmax(0, 1fr); min-height: 100vh; }
+.app.rail-open { grid-template-columns: var(--rail-open) minmax(0, 1fr); }
+
+.rail {
+  position: sticky; top: 0; align-self: start; height: 100vh;
+  display: flex; flex-direction: column; gap: 6px; padding: 12px 11px;
+  background: var(--surface); border-right: 1px solid var(--line);
+  overflow: hidden; z-index: 40;
+}
+.rail-btn {
+  display: flex; align-items: center; gap: 14px; flex: none;
+  width: 100%; min-height: 52px; padding: 0 13px;   /* 52: comfortable glove-sized tap */
+  background: none; border: 0; border-radius: var(--r-sm);
+  color: var(--faint); cursor: pointer; position: relative;
+  transition: color .16s var(--ease), background .16s var(--ease);
+}
+.rail-btn svg { width: 23px; height: 23px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.rail-btn span {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .13em;
+  text-transform: uppercase; white-space: nowrap; opacity: 0;
+  transition: opacity .18s var(--ease);
+}
+.app.rail-open .rail-btn span { opacity: 1; }
+.rail-btn:hover { color: var(--muted); background: var(--surface2); }
+.rail-btn[aria-selected="true"] { color: var(--accent); background: var(--tint-accent); }
+/* The selected marker is the one piece of chrome allowed to glow: it is the
+   "you are here" light on an instrument panel, and it echoes the truck. */
+.rail-btn[aria-selected="true"]::before {
+  content: ""; position: absolute; left: -13px; top: 10px; bottom: 10px; width: 3px;
+  background: var(--accent); border-radius: 0 3px 3px 0; box-shadow: 0 0 10px var(--accent);
+}
+.rail-sep { height: 1px; background: var(--line); margin: 8px 2px; flex: none; }
+.rail-grow { flex: 1 1 auto; }
+
+.main {
+  min-width: 0; padding: 0 clamp(14px, 1.6vw, 26px) clamp(14px, 1.6vw, 22px);
+  max-width: 2200px; margin: 0 auto; width: 100%;
+  display: flex; flex-direction: column; min-height: 100vh;
+}
+
+/* ================= top bar ================= */
+/* min-width:0 on the flex children and a wrap as the backstop: without both, the
+   title + pills + clock + button row simply grew past the viewport and dragged
+   a horizontal scrollbar onto every view. */
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 13px 0 12px; margin-bottom: 14px;
+  background: linear-gradient(var(--bg) 76%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+.topbar > * { min-width: 0; }
+h1 {
+  font-family: var(--disp); font-size: var(--t-lg); font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.sys-state { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: var(--t-sm); white-space: nowrap; }
+/* Energized glow: the dot reports a live link, so the halo is the state. */
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--good); box-shadow: 0 0 9px var(--good); }
+.dot.pulse { animation: pulse 2.6s ease-in-out infinite; }
+.dot.w { background: var(--warn); box-shadow: 0 0 9px var(--warn); }
+.dot.c { background: var(--crit); box-shadow: 0 0 9px var(--crit); animation: none; }
+@keyframes pulse { 50% { opacity: .28; } }
+.spacer { flex: 1 1 auto; }
+
+/* Solar / charging status. Hidden on Overview, where the hero state line says
+   the same thing at a size you can read from across the box. */
+.pills { display: flex; align-items: center; gap: 14px; }
+.app[data-view="overview"] .pills, .app[data-view="overview"] .pill-div { display: none; }
+.pill { display: flex; align-items: center; gap: 11px; white-space: nowrap; }
+.pill-ico {
+  width: 38px; height: 38px; border-radius: 999px; flex: none;
+  display: grid; place-items: center; border: 1px solid var(--line2);
+}
+.pill-ico svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pill-txt .k {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--faint);
+}
+.pill-txt .v { font-size: var(--t-sm); margin-top: 2px; font-weight: 500; }
+.pill-div { width: 1px; height: 34px; background: var(--line2); }
+
+/* Clock + freshness. A wall display should say when it last heard from the rig. */
+.clock { text-align: right; white-space: nowrap; }
+.clock .t { font-family: var(--mono); font-size: var(--t-md); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.clock .s { font-size: var(--t-micro); color: var(--faint); margin-top: 1px; }
+
+.icon-btn {
+  width: 44px; height: 44px; border-radius: var(--r-sm); background: var(--surface2);
+  border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+  display: grid; place-items: center; flex: none;
+  transition: color .16s var(--ease), border-color .16s var(--ease);
+}
+.icon-btn:hover { color: var(--ink); border-color: var(--line2); }
+.icon-btn:active { background: var(--surface3); }
+.icon-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn.spin svg { animation: spin .7s var(--ease); }
+
+/* ================= cards ================= */
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--e1);
+}
+.card-h {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap; padding: 15px 17px 0;
+}
+.card-h h3, .sub-head {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted);
+}
+.card-h h3 .note {
+  font-family: var(--sans); color: var(--faint); letter-spacing: 0;
+  text-transform: none; font-weight: 400; font-size: var(--t-sm);
+}
+.sub-head { color: var(--faint); margin: 26px 0 10px; }
+
+/* The tile: one stat block, used on every view. Tinted icon square, label,
+   value, optional meter, sub. Near views only — Overview has its own panels. */
+.stat {
+  display: grid; grid-template-columns: auto minmax(0,1fr); gap: 15px; align-items: center;
+  padding: 16px 17px;
+}
+.stat > :only-child { grid-column: 1 / -1; }   /* tiles rendered without an icon */
+.stat-ico { width: 48px; height: 48px; border-radius: 13px; display: grid; place-items: center; flex: none; }
+.stat-ico svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.stat .k {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted);
+}
+.stat .v {
+  font-size: var(--t-xl); font-weight: 600; margin-top: 4px; line-height: 1.08;
+  letter-spacing: -.015em;
+}
+.stat .v small { font-size: .52em; color: var(--muted); font-weight: 400; margin-left: 5px; letter-spacing: 0; }
+.stat .sub { color: var(--faint); font-size: var(--t-sm); margin-top: 5px; line-height: 1.4; }
+/* A reading of zero is not news. Dim it so a screen with real power on it reads
+   differently from a screen without, at a glance and from a distance. */
+.stat.is-zero .v { color: var(--muted); }
+.stat.is-zero .stat-ico { opacity: .5; }
+.meter { height: 5px; background: var(--surface3); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+.meter i {
+  display: block; height: 100%; width: 100%; border-radius: 3px;
+  transform-origin: left center; transform: scaleX(0);
+  transition: transform .8s var(--ease);   /* transform, not width: no layout thrash */
+}
+.pos { color: var(--good); } .neg { color: var(--warn); }
+
+/* ================= views ================= */
+.view { display: none; }
+.view.active { display: block; }
+
+/* ---------- overview: the far view ----------
+   One screen, no scroll, at any tablet size from 1024x768 up. Three card-less
+   bands: marquee (how full), stage (the rig, sun in on the left, draw out on
+   the right), ribbon (the last 24 h). The rows are minmax(0,1fr) so slack is
+   absorbed rather than left as a dead band at 1080p, and type is vh-clamped
+   so nothing falls off the bottom at 768p. */
+#view-overview.active {
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(10px, 1.6vh, 22px); flex: 1 1 auto; min-height: 0;
+}
+
+/* the stage reads left to right as the power does: INPUT panel feeds the truck,
+   the truck stores it, the OUTPUT panel draws it. The truck takes every px of
+   band height; the panels hug it from both sides. */
+.stage {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: clamp(10px, 1.6vw, 34px); align-items: center; min-height: 0; min-width: 0;
+}
+.stage-truck { height: 100%; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; }
+.stage-truck svg { display: block; height: 100%; width: auto; aspect-ratio: 1000 / 504; max-width: 100%; }
+
+/* a panel frames one side of the energy story: hairline frame, INPUT/OUTPUT
+   title, hero watts, then per-source rows — label left, value right, no key
+   dots. Both panels read left-aligned so the eye lands the same way twice. */
+.panel {
+  align-self: stretch; display: flex; flex-direction: column;
+  gap: clamp(5px, 1vh, 12px); min-width: 0; width: 100%; max-width: 400px;
+  border: 1px solid var(--line2); border-radius: var(--r-lg);
+  background: rgba(255,255,255,.014);
+  padding: clamp(12px, 2.2vh, 24px) clamp(14px, 1.4vw, 26px);
+}
+.panel-in { justify-self: end; }
+.panel-out { justify-self: start; }
+.panel-t {
+  font-family: var(--disp); font-size: var(--f-label); font-weight: 600;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
+  padding-bottom: clamp(6px, 1.2vh, 14px); border-bottom: 1px solid var(--line);
+  margin-bottom: clamp(2px, .8vh, 10px);
+}
+.panel-k {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--disp); font-size: var(--f-label); font-weight: 600;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+}
+.panel-k svg {
+  width: clamp(17px, 2.2vh, 22px); height: clamp(17px, 2.2vh, 22px); flex: none;
+  stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+.panel-v {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: clamp(34px, 5.4vh, 68px); font-weight: 600; line-height: 1;
+}
+.panel-v small { font-size: .42em; color: var(--muted); font-weight: 400; margin-left: 7px; }
+.panel.is-zero .panel-v { color: var(--muted); }
+.prows { display: flex; flex-direction: column; gap: clamp(4px, .9vh, 10px); margin-top: clamp(2px, .6vh, 8px); }
+.wrow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: var(--f-sub); color: var(--muted); white-space: nowrap; }
+.wrow .rlbl { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+.wrow .rlbl svg {
+  width: 17px; height: 17px; flex: none; align-self: center;
+  stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+  color: var(--faint);
+}
+.wrow b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; color: var(--ink); }
+.wrow.dim b { color: var(--faint); font-family: var(--sans); }
+.wrow.rule { margin-top: clamp(6px, 1.2vh, 14px); padding-top: clamp(6px, 1.2vh, 14px); border-top: 1px solid var(--line); }
+
+/* the ribbon: 24 h of charge under the wheels, full width, no card */
+.ribbon { display: flex; flex-direction: column; gap: 4px; height: clamp(110px, 15vh, 200px); min-height: 0; }
+.ribbon-h { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 0 2px; }
+.ribbon-k {
+  font-family: var(--disp); font-size: var(--f-label); font-weight: 600;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+}
+.ribbon .chart-wrap { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
+/* the ribbon names its lines where they end — no legend to cross-reference */
+.soc-tag { font-family: var(--disp); font-size: 14px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.ribbon .chart-wrap svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ribbon .axis, #view-overview .axis { font-size: clamp(14px, 1.5vh, 17px); }   /* Overview floor applies to axes too */
+
+/* schematic type — sized up for the far view; these are the most-glanced numbers */
+.sch-lbl { font-family: var(--disp); font-size: 15px; font-weight: 600; letter-spacing: .11em; fill: var(--muted); text-transform: uppercase; }
+.sch-tiny { font-family: var(--disp); font-size: 14px; font-weight: 600; letter-spacing: .11em; fill: var(--muted); text-transform: uppercase; }
+.sch-val { font-family: var(--mono); font-size: 16px; fill: var(--ink); font-variant-numeric: tabular-nums; }
+.sch-big { font-family: var(--mono); font-size: 27px; font-weight: 600; fill: var(--ink); font-variant-numeric: tabular-nums; }
+/* non-numeric state words on the schematic speak display, not measurement */
+.sch-word { font-family: var(--disp); font-size: 14px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; fill: var(--faint); }
+.sch-detail { fill: none; stroke: var(--line2); stroke-width: 1.3; }
+.sch-panel { fill: rgba(36,146,186,.05); stroke: var(--line3); stroke-width: 1.4; }
+.sch-cellline { stroke: var(--line2); stroke-width: 1; }
+.sch-box { fill: var(--surface2); stroke: var(--line2); stroke-width: 1.3; }
+/* the bus bars bonding Unit A's two packs into one bank */
+.sch-link { fill: var(--line3); }
+/* the neon truck photo: screen blend melts its black field into the card */
+.sch-truck { mix-blend-mode: screen; opacity: .95; }
+
+/* flows: inert grey until power actually moves, then coloured + marching */
+.flow { fill: none; stroke: var(--line2); stroke-width: 2.2; stroke-linecap: round; transition: stroke .4s; }
+.flow.on { stroke: var(--fc); stroke-dasharray: 7 8; animation: march 1.05s linear infinite; filter: drop-shadow(0 0 4px var(--fc)); }
+.flow.rev.on { animation-direction: reverse; }
+@keyframes march { to { stroke-dashoffset: -15; } }
+.head { fill: var(--line2); transition: fill .4s; }
+.head.on { fill: var(--fc); filter: drop-shadow(0 0 4px var(--fc)); }
+.node { fill: var(--surface3); stroke: var(--line2); stroke-width: 1.3; }
+.node.on { stroke: var(--fc); }
+
+/* ---------- the hero: bank charge bar + what the rig is doing about it ----------
+   The one thing you must be able to read from the far end of the box. The number
+   and the bar are one object; the state line under the bar answers "and then?" */
+.marquee {
+  display: grid; grid-template-columns: auto minmax(0,1fr);
+  gap: clamp(18px, 3vw, 44px); align-items: center;
+  padding: clamp(10px, 1.6vh, 20px) clamp(4px, .6vw, 16px) 0;
+}
+.bank-stack { display: grid; gap: clamp(8px, 1.2vh, 14px); min-width: 0; }
+.cells { display: flex; gap: 6px; align-items: stretch; }
+.cellwrap {
+  flex: 1 1 auto; display: flex; gap: clamp(2px, .35vw, 5px);
+  border: 2px solid var(--line3); border-radius: 11px; padding: clamp(5px, .7vh, 8px);
+}
+.cellcap {
+  width: 8px; align-self: center; height: clamp(26px, 3.4vh, 42px);
+  background: var(--line3); border-radius: 0 3px 3px 0; flex: none;
+}
+.cellwrap i {
+  flex: 1 1 0; min-height: clamp(32px, 5.2vh, 62px); border-radius: 3px;
+  background: var(--surface3); transition: background .5s var(--ease), box-shadow .5s var(--ease);
+}
+/* Energized glow: a lit segment is charge you actually have. */
+.cellwrap i.f { background: var(--good); box-shadow: 0 0 12px rgba(62,216,138,.4); }
+.cellwrap i.f.w { background: var(--warn); box-shadow: 0 0 12px rgba(227,179,65,.4); }
+.cellwrap i.f.c { background: var(--crit); box-shadow: 0 0 12px rgba(240,85,90,.4); }
+.bank-read { text-align: left; white-space: nowrap; }
+.bank-read .k {
+  font-family: var(--disp); font-size: var(--f-label); font-weight: 600; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: clamp(2px, .6vh, 8px);
+}
+.bank-read .big {
+  font-family: var(--mono); font-size: var(--f-hero); font-weight: 600; line-height: .92;
+  font-variant-numeric: tabular-nums; letter-spacing: -.035em;
+}
+.bank-read .big small { font-size: .3em; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+.bank-read .sub { color: var(--muted); font-size: var(--f-sub); margin-top: clamp(4px, .8vh, 10px); }
+.bank-read .sub b { color: var(--ink); font-weight: 500; font-family: var(--mono); }
+
+/* the state line — direction, rate, and time remaining, in words. No icons:
+   from ten feet a word in the state's colour beats a 17px glyph every time. */
+.bank-state {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: clamp(10px, 1.2vw, 20px); font-size: var(--f-label); color: var(--muted);
+}
+.bank-state .grp { display: inline-flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.bank-state .lead { font-family: var(--disp); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.bank-state b { font-family: var(--mono); color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.bank-state .sep { width: 1px; height: 1.2em; background: var(--line2); flex: none; align-self: center; }
+.bank-state .chg { color: var(--good); }
+.bank-state .dsg { color: var(--warn); }
+.bank-state .idle { color: var(--faint); }
+
+/* ---------- units ---------- */
+.units { display: grid; grid-template-columns: 1fr 118px 1fr; align-items: stretch; }
+.unit { padding: 19px; position: relative; overflow: hidden; }
+.unit::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+.unit-a::before { background: linear-gradient(var(--a-bright), transparent 86%); }
+.unit-b::before { background: linear-gradient(var(--b-bright), transparent 86%); }
+.unit h2 {
+  font-family: var(--disp); font-size: var(--t-md); font-weight: 700; letter-spacing: .13em;
+  text-transform: uppercase; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.unit h2 .role { color: var(--faint); font-weight: 500; font-size: var(--t-micro); letter-spacing: .09em; }
+.swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.unit-a .swatch { background: var(--a); } .unit-b .swatch { background: var(--b); }
+.unit-top { display: flex; gap: 20px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+
+/* The gauge is the ring + the big percentage only. The capacity line used to sit
+   inside the SVG at y=91, where a 20-char string ran straight through the arc at
+   both ends — it lives under the ring now, in HTML, where it can be sized. */
+.gauge-wrap { flex: none; width: 168px; text-align: center; }
+.gauge { width: 168px; display: block; }
+.g-soc { font-size: 38px; font-weight: 600; fill: var(--ink); font-family: var(--mono); }
+.g-pct { font-size: 15px; fill: var(--muted); }
+.gauge-cap { font-size: var(--t-sm); color: var(--muted); margin-top: -4px; }
+.gauge-cap b { font-family: var(--mono); color: var(--ink); font-weight: 500; }
+
+.state { display: flex; flex-direction: column; gap: 12px; min-width: 210px; flex: 1; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
+  border: 1px solid var(--line2); border-radius: 999px; padding: 6px 14px;
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+}
+.chip .d { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.chip.chg { color: var(--good); } .chip.chg .d { background: var(--good); box-shadow: 0 0 6px var(--good); }
+.chip.dsg { color: var(--warn); } .chip.dsg .d { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+.chip.idle { color: var(--muted); } .chip.idle .d { background: var(--faint); }
+.chip-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.eta { color: var(--muted); font-size: var(--t-sm); }
+.eta b { color: var(--ink); font-weight: 500; }
+/* label and value stay adjacent — a dotted leader beats a 400px void */
+.flows { display: grid; gap: 7px; font-size: var(--t-sm); max-width: 340px; }
+.flows .row { display: grid; grid-template-columns: auto minmax(12px,1fr) auto; align-items: baseline; gap: 8px; }
+.flows .row span { color: var(--muted); }
+.flows .row::after { display: none; }
+.flows .row i { border-bottom: 1px dotted var(--line2); transform: translateY(-.25em); }
+.flows .row b { font-weight: 500; }
+
+/* Six cells, so the column count has to divide 6 — auto-fit picked 5 and left an
+   orphan. A container query reads the CARD's width, which is what actually
+   varies: at 1024 the two-up unit cards are ~400px and a viewport breakpoint
+   can't tell that from a 400px card on a phone. */
+.unit { container-type: inline-size; }
+.grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); border-radius: var(--r-sm);
+  overflow: hidden; margin-top: 18px;
+}
+@container (min-width: 560px) {
+  .grid { grid-template-columns: repeat(3, 1fr); }
+}
+.cell { background: var(--surface2); padding: 12px 14px; }
+.cell .k { color: var(--faint); font-size: var(--t-micro); letter-spacing: .1em; text-transform: uppercase; font-family: var(--disp); font-weight: 600; }
+.cell .v { margin-top: 5px; font-size: var(--t-md); }
+.cell .v small { color: var(--muted); font-size: .8em; }
+.packs { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.pack {
+  border: 1px solid var(--line2); border-radius: 8px; padding: 9px 13px;
+  font-size: var(--t-sm); color: var(--muted); display: flex; gap: 12px; align-items: baseline;
+}
+.pack b { color: var(--ink); font-weight: 600; font-family: var(--disp); letter-spacing: .06em; text-transform: uppercase; font-size: var(--t-micro); }
+
+.conduit { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; }
+.conduit .lbl {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .12em;
+  color: var(--faint); text-transform: uppercase; text-align: center; line-height: 1.5;
+}
+.conduit .w { font-family: var(--mono); font-size: var(--t-sm); color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ---------- charts ---------- */
+.chart-wrap { position: relative; margin: 10px 17px 12px; touch-action: pan-y; }
+.chart-wrap svg { display: block; width: 100%; }
+.legend { display: flex; gap: 16px; font-size: var(--t-sm); color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+.legend .ln { width: 16px; height: 2px; border-radius: 1px; vertical-align: 4px; }
+.tooltip {
+  position: absolute; pointer-events: none; display: none; z-index: 5;
+  background: var(--surface2); border: 1px solid var(--line2); border-radius: 10px;
+  padding: 11px 13px; font-size: var(--t-sm); white-space: nowrap;
+  box-shadow: var(--e3);
+}
+.tooltip .tt-t { color: var(--faint); margin-bottom: 6px; }
+.tooltip .tt-row { display: flex; align-items: center; gap: 10px; line-height: 1.8; }
+.tooltip .tt-row i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.tooltip .tt-row b { margin-left: auto; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+/* Axis type never falls below the smallest UI label — an unreadable axis makes
+   the chart decorative. */
+.axis { fill: var(--muted); font-size: var(--t-micro); font-family: var(--mono); }
+.gridline { stroke: rgba(255,255,255,.055); }
+.empty-note {
+  color: var(--muted); font-size: var(--t-base); padding: 44px 16px; text-align: center;
+  line-height: 1.7; max-width: 62ch; margin: 0 auto;
+}
+.empty-note b { display: block; color: var(--ink); font-weight: 600; margin-bottom: 6px; font-family: var(--disp); letter-spacing: .04em; }
+
+/* ---------- shared layout bits ---------- */
+.seg { display: flex; gap: 3px; background: var(--surface2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px; }
+.seg button {
+  font-family: var(--disp); font-size: var(--t-sm); font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); background: none; border: 0;
+  padding: 10px 18px; border-radius: 7px; cursor: pointer; min-height: 44px;
+  transition: background .16s var(--ease), color .16s var(--ease);
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-selected="true"] { background: var(--surface3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
+.rangebar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.cov { color: var(--faint); font-size: var(--t-sm); }
+.stack { display: grid; gap: 14px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.stat-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
+footer {
+  margin-top: 30px; color: var(--faint); font-size: var(--t-sm); text-align: center;
+  line-height: 1.8; max-width: 82ch; margin-inline: auto; text-wrap: balance;
+}
+footer code { color: var(--muted); font-family: var(--mono); }
+
+/* settings popover */
+.settings {
+  position: fixed; left: calc(var(--rail) + 12px); bottom: 16px; z-index: 60; display: none;
+  background: var(--surface2); border: 1px solid var(--line2); border-radius: var(--r);
+  padding: 17px; min-width: 268px; box-shadow: var(--e3);
+}
+.app.rail-open .settings { left: calc(var(--rail-open) + 12px); }
+.settings.open { display: block; }
+.settings h4 {
+  font-family: var(--disp); font-size: var(--t-micro); letter-spacing: .16em; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 12px; font-weight: 600;
+}
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 44px; }
+.set-row span { color: var(--muted); font-size: var(--t-sm); }
+
+/* Toggle: 52x30 with a 44px hit band, so a finger lands on it every time. */
+.toggle {
+  width: 52px; height: 30px; border-radius: 999px; background: var(--surface3);
+  border: 1px solid var(--line2); position: relative; cursor: pointer; flex: none;
+  transition: background .18s var(--ease), border-color .18s var(--ease);
+}
+/* Invisible tap band: the switch reads as 52x30 but accepts a 66x44 finger.
+   `inset` is inert without position:absolute — without it this did nothing. */
+.toggle::before { content: ""; position: absolute; inset: -9px; border-radius: 999px; }
+.toggle::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
+  border-radius: 50%; background: var(--faint);
+  transition: transform .18s var(--ease), background .18s var(--ease);
+}
+.toggle[aria-checked="true"] { background: rgba(62,216,138,.22); border-color: rgba(62,216,138,.5); }
+.toggle[aria-checked="true"]::after { transform: translateX(22px); background: var(--good); }
+
+.mini-seg { display: flex; gap: 3px; background: var(--surface3); border-radius: 9px; padding: 3px; }
+.mini-seg button {
+  font-family: var(--disp); font-weight: 600; font-size: var(--t-sm); letter-spacing: .04em;
+  color: var(--muted); background: none; border: 0; padding: 0 14px;
+  min-height: 38px; min-width: 52px; border-radius: 6px; cursor: pointer;
+  transition: background .16s var(--ease), color .16s var(--ease);
+}
+.mini-seg button:hover { color: var(--ink); }
+.mini-seg button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--e1); }
+/* full-size targets on the control page, where these are the primary affordance */
+.ctl-row .mini-seg button { min-height: 44px; min-width: 56px; }
+
+/* ---------- control page ---------- */
+.ctl-units { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+/* deliberately NOT dimmed/blocked: device/list's online flag flaps and lags
+   (2026-08-03: fresh quota + accepted write while flagged offline), so the
+   badge warns but never gates — a dead unit still fails loudly via the toast */
+.ctl-sec { border: 1px solid var(--line); border-radius: var(--r-sm); margin-top: 14px; background: var(--surface2); }
+.ctl-sec summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; padding: 0 16px; min-height: 48px;
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted);
+}
+.ctl-sec summary::-webkit-details-marker { display: none; }
+.ctl-sec summary::after {
+  content: ""; margin-left: auto; width: 8px; height: 8px;
+  border-right: 1.7px solid var(--faint); border-bottom: 1.7px solid var(--faint);
+  transform: rotate(45deg); transition: transform .2s var(--ease);
+}
+.ctl-sec[open] summary::after { transform: rotate(225deg); }
+
+/* The row. Text block left (capped so the hint reads as prose, not a ribbon),
+   control right in a fixed column — the control stays next to the label that
+   names it instead of drifting to the far edge of a 900px card. */
+.ctl-row {
+  /* auto, not a fixed 224px: the six-option segmented controls are ~340px wide
+     and were overflowing a fixed track leftwards, straight across their own
+     labels on a narrow tablet. The text column yields instead. */
+  display: grid; grid-template-columns: minmax(0,1fr) minmax(220px, auto);
+  align-items: center; column-gap: 20px; row-gap: 5px;
+  padding: 13px 16px; min-height: 60px; border-top: 1px solid var(--line);
+  position: relative; transition: opacity .2s var(--ease);
+}
+.ctl-row .lbl { font-size: var(--t-base); font-weight: 500; }
+.ctl-row .hint {
+  grid-column: 1; color: var(--muted); font-size: var(--t-sm);
+  line-height: 1.55; max-width: 46ch;
+}
+.ctl-row > .toggle, .ctl-row > .mini-seg, .ctl-row > .ctl-slider {
+  grid-column: 2; grid-row: 1 / span 2; justify-self: end;
+}
+/* On a full-width card the 1fr text column would strand the control a thousand
+   pixels from its label. A third, empty track absorbs the slack instead, so the
+   pair stays together no matter how wide the card gets. */
+#balCard .ctl-row { grid-template-columns: minmax(0, 54ch) minmax(220px, auto) minmax(0, 1fr); }
+#balCard .ctl-row .hint { max-width: none; }
+
+.risk-tag {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--warn); border: 1px solid rgba(227,179,65,.4);
+  border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: 1px;
+}
+.off-badge {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--crit); border: 1px solid rgba(240,85,90,.45);
+  border-radius: 5px; padding: 3px 9px;
+  animation: pulse 2.6s ease-in-out infinite;
+}
+.fresh-chip {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--warn); border: 1px solid rgba(227,179,65,.45);
+  border-radius: 5px; padding: 3px 9px;
+}
+.fresh-chip.ble { color: var(--accent); border-color: rgba(79,179,232,.5); }
+.ctl-row.pending { opacity: .55; }
+.ctl-row.pending > * { pointer-events: none; }
+.ctl-row.pending::after {
+  content: ""; position: absolute; right: 16px; top: 50%; margin-top: -9px;
+  width: 18px; height: 18px; border-radius: 50%; z-index: 2;
+  border: 2px solid var(--line3); border-top-color: var(--accent);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+.ctl-row.ok { animation: flash-ok 1.4s var(--ease); }
+.ctl-row.fail { animation: flash-fail 1.8s var(--ease); }
+@keyframes flash-ok { 0%, 40% { box-shadow: inset 0 0 0 1px var(--good), 0 0 14px rgba(62,216,138,.25); } }
+@keyframes flash-fail { 0%, 50% { box-shadow: inset 0 0 0 1px var(--crit), 0 0 14px rgba(240,85,90,.3); } }
+
+/* Slider: 26px thumb over a 6px track, wrapped in a 44px hit band. The value
+   sits at a fixed width to the right so the digits don't shift the track. */
+.ctl-slider { display: flex; align-items: center; gap: 14px; width: 100%; }
+.ctl-slider input[type=range] {
+  -webkit-appearance: none; appearance: none; flex: 1 1 auto; height: 44px;
+  background: none; cursor: pointer; min-width: 110px;
+}
+.ctl-slider input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px; background: var(--surface3);
+  border: 1px solid var(--line2);
+}
+.ctl-slider input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); border: 4px solid var(--surface); margin-top: -10px;
+  box-shadow: var(--e1);
+}
+.ctl-slider input[type=range]::-moz-range-track {
+  height: 6px; border-radius: 3px; background: var(--surface3); border: 1px solid var(--line2);
+}
+.ctl-slider input[type=range]::-moz-range-thumb {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
+  border: 4px solid var(--surface); box-shadow: var(--e1);
+}
+.ctl-slider input[type=range]:active::-webkit-slider-thumb { background: #6CC2F0; }
+.ctl-val {
+  min-width: 62px; text-align: right; font-size: var(--t-md); font-weight: 500;
+  flex: none;
+}
+.ctl-note {
+  color: var(--muted); font-size: var(--t-sm); line-height: 1.65;
+  padding: 0 17px 16px; max-width: 74ch;
+}
+
+/* auto balance card */
+.bal-state {
+  margin-left: auto; font-family: var(--disp); font-size: var(--t-micro); font-weight: 600;
+  letter-spacing: .12em; text-transform: uppercase; border: 1px solid var(--line2);
+  border-radius: 5px; padding: 3px 9px; color: var(--muted);
+}
+.bal-state[data-state="transferring"] { color: var(--good); border-color: rgba(62,216,138,.45); }
+.bal-state[data-state="waiting"] { color: var(--accent); border-color: rgba(79,179,232,.5); }
+.bal-state[data-state="emergency"] { color: var(--warn); border-color: rgba(227,179,65,.5); }
+.bal-state[data-state="error"] { color: var(--crit); border-color: rgba(240,85,90,.45); }
+.bal-state[data-state="disabled"] { color: var(--faint); }
+
+/* confirm sheet */
+.sheet-veil {
+  position: fixed; inset: 0; z-index: 80; display: none;
+  align-items: center; justify-content: center; padding: 20px;
+  background: rgba(4,6,10,.62); backdrop-filter: blur(3px);
+}
+.sheet-veil.open { display: flex; }
+.sheet {
+  background: var(--surface2); border: 1px solid var(--line2); border-radius: var(--r);
+  max-width: 460px; width: 100%; padding: 22px 22px 20px;
+  box-shadow: var(--e3); animation: rise .25s var(--ease);
+}
+.sheet h4 {
+  font-family: var(--disp); font-size: var(--t-sm); font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--warn); display: flex; align-items: center; gap: 9px;
+}
+.sheet h4 svg { width: 19px; height: 19px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sheet p { color: var(--muted); font-size: var(--t-base); line-height: 1.7; margin-top: 14px; }
+.sheet p b { color: var(--ink); font-weight: 600; }
+.sheet-btns { display: flex; gap: 12px; margin-top: 20px; }
+.btn {
+  flex: 1; min-height: 48px; border-radius: var(--r-sm); cursor: pointer;
+  font-family: var(--disp); font-size: var(--t-sm); font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; border: 1px solid var(--line2);
+  background: var(--surface3); color: var(--muted);
+  transition: color .16s var(--ease), border-color .16s var(--ease);
+}
+.btn:hover { color: var(--ink); border-color: var(--line3); }
+.btn-go { background: rgba(240,85,90,.14); border-color: rgba(240,85,90,.5); color: var(--crit); }
+.btn-go:hover { color: #ff7a7e; border-color: var(--crit); }
+
+/* toast */
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translate(-50%, 14px); z-index: 90;
+  background: var(--surface2); border: 1px solid var(--line2); border-radius: 11px;
+  padding: 13px 18px; font-size: var(--t-base); max-width: min(540px, 92vw);
+  box-shadow: var(--e3); opacity: 0; pointer-events: none;
+  transition: opacity .25s var(--ease), transform .25s var(--ease);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.ok { border-color: rgba(62,216,138,.45); color: var(--good); }
+.toast.fail { border-color: rgba(240,85,90,.5); color: var(--crit); }
+
+/* ================= responsive =================
+   Structural, not fluid — except Overview, whose type is vh-clamped above so a
+   768px-tall tablet and a 1440px wall display both get exactly one screenful. */
+
+/* ONE SCREEN, NO SCROLL — the whole point of the far view.
+   min-height:100vh alone let the section grow past the viewport and push the
+   tiles below the fold on a 768px-tall tablet. Pinning the height and letting
+   every descendant shrink (min-height:0) is what actually holds the contract.
+   Gated on a viewport big enough to honour it: anything smaller scrolls
+   normally, because clipping is worse than scrolling. */
+@media (min-width: 900px) and (min-height: 620px) {
+  .app[data-view="overview"] .main { height: 100vh; min-height: 0; overflow: hidden; }
+  #view-overview.active { min-height: 0; overflow: hidden; }
+  .stage, .stage-truck { min-height: 0; }
+}
+
+/* When one screen can't hold everything, Overview sheds history before it sheds
+   live state — the 24 h shape is a Power-view question, "what is the rig doing
+   right now" is not. */
+@media (max-width: 1100px), (max-height: 700px) {
+  .ribbon { display: none; }
+}
+
+/* Narrow: the panels can't flank a readable truck any more, so they move under
+   it side by side — input on the left, output on the right, still in flow
+   order. The truck stays height-driven so the one-screen contract holds. */
+@media (max-width: 1100px) {
+  .stage { grid-template-columns: minmax(0,1fr) minmax(0,1fr); grid-template-rows: minmax(0,1fr) auto; align-items: start; }
+  .stage-truck { grid-column: 1 / -1; }
+  .panel { max-width: none; align-self: start; }
+  .panel-in { order: 2; }
+  .panel-out { order: 3; }
+}
+/* Below the one-screen gate the page scrolls, so the truck sizes off width. */
+@media (max-width: 900px) {
+  .stage-truck { height: auto; }
+  .stage-truck svg { width: 100%; height: auto; }
+}
+/* The schematic's type is set in SVG user units, so it shrinks with the truck.
+   Below 1100px the truck renders at roughly 60% scale — bump the sizes so the
+   glance numbers keep an effective 14px, and shed the sub-labels first. */
+@media (max-width: 1100px) {
+  .sch-lbl { font-size: 24px; }
+  .sch-val { font-size: 25px; }
+  .sch-word { font-size: 24px; }
+  .sch-big { font-size: 42px; }
+  .sch-tiny { display: none; }
+}
+@media (max-width: 640px) {
+  .sch-val { display: none; }
+}
+/* Below this the four-across tiles get too tight; two rows of two reads better. */
+/* Two control cards side by side leave ~330px each — not enough for a label,
+   a hint and a segmented control. One column below this. */
+@media (max-width: 1250px) {
+  .ctl-units { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  #view-overview.active { grid-template-rows: auto auto auto; }
+  .marquee { grid-template-columns: 1fr; gap: 16px; }
+  .units { grid-template-columns: 1fr; }
+  .conduit { flex-direction: row; padding: 16px 0; gap: 14px; }
+  .conduit svg { transform: rotate(90deg); width: 46px; }
+  .two-col { grid-template-columns: 1fr; }
+  .stat-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+/* Topbar sheds its secondary readouts before it wraps. Order of sacrifice:
+   pills (duplicated in the views), then the freshness line, then the clock. */
+@media (max-width: 1150px) {
+  .topbar .pills, .topbar .pill-div { display: none; }
+}
+@media (max-width: 620px) {
+  .clock .s { display: none; }
+}
+@media (max-width: 460px) {
+  .topbar .clock, .topbar .pill-div { display: none; }
+}
+
+@media (max-width: 780px) {
+  /* keep both tracks — dropping the second one collapses main into an implicit column */
+  .app, .app.rail-open { grid-template-columns: var(--rail) minmax(0, 1fr); }
+  .app.rail-open .rail-btn span { opacity: 0; }
+  .main { padding: 0 12px 30px; }
+  /* side-by-side icon + value leaves too little room for "4.9 kWh" here */
+  .stat { grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .stat .v { font-size: var(--t-lg); }
+  h1 { font-size: var(--t-md); }
+  .pill-txt .k { display: none; }
+  .clock .s { display: none; }
+  .settings { left: calc(var(--rail) + 8px); right: 8px; min-width: 0; }
+  /* the control column can't hold 224px next to a label at this width */
+  .ctl-row, #balCard .ctl-row { grid-template-columns: minmax(0,1fr); row-gap: 12px; }
+  .ctl-row > .toggle, .ctl-row > .mini-seg, .ctl-row > .ctl-slider {
+    grid-column: 1; grid-row: auto; justify-self: start;
+  }
+  /* only the slider earns full width — a 260px-wide toggle is not a toggle */
+  .ctl-row > .ctl-slider { width: 100%; }
+  .ctl-row > .mini-seg { max-width: 100%; overflow-x: auto; }
+  .ctl-row .hint { max-width: none; }
+}
+
+/* Reduced motion keeps the feedback and drops the loops. A blanket .01ms kill
+   would also erase the ok/fail flash and the pending spinner — the only signal
+   that a command actually reached the hardware. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 120ms !important; }
+  .flow.on { animation: none; stroke-dasharray: none; }
+  .dot.pulse, .off-badge { animation: none; }
+  .sheet { animation: none; }
+  .icon-btn.spin svg { animation: none; }
+  .ctl-row.pending::after { animation: none; border-top-color: var(--accent); }
+  /* state persists as a static edge instead of a flash */
+  .ctl-row.ok { animation: none; box-shadow: inset 0 0 0 1px var(--good); }
+  .ctl-row.fail { animation: none; box-shadow: inset 0 0 0 1px var(--crit); }
+}
+</style>
+</head>
+<body>
+<!--
+THESIS: The rig itself is the instrument — one glance answers "how full, which way,
+how long". Refuses the category default: a hero image beside a grid of icon stat cards.
+OWN-WORLD: inherited DESIGN.md — dark #070A0F field, the truck's own blue, energized
+glow only on live power, IBM Plex Sans display + Plex Mono numerals. Unit identity
+colors are retired on this surface: everything speaks the truck's blue plus status.
+STORY: from 8 ft — battery big at top, then the power's own path left to right:
+INPUT (solar, shore) feeds the truck, the truck stores it, OUTPUT draws it. The
+last 24 h rides as a ribbon under the wheels. Walk closer for every other view.
+FIRST VIEWPORT: full-screen marquee (SOC + segmented bar + state in words), the neon
+NPR centered and large with per-bank charge on its box, framed INPUT panel left,
+framed OUTPUT panel right, 24 h charge ribbon bottom. No scroll at 1920x1080.
+FORM: balance-wings, candidate 6 of 7, seed 3b4fb214 — evolved 2026-08-05 into
+input→rig→output panels ("power-path" revision).
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish
+review, the verdict, and DESIGN.md.
+-->
+<div class="app" id="app">
+
+<!-- ================= left rail ================= -->
+<nav class="rail" id="rail">
+  <button class="rail-btn" id="railToggle" aria-label="Toggle navigation labels">
+    <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span>Menu</span>
+  </button>
+  <div class="rail-sep"></div>
+  <!-- display:contents keeps the rail's flex column intact while giving the six
+       view buttons a real tablist in the a11y tree — aria-selected is only valid
+       on a tab, and it was sitting on bare buttons before. -->
+  <div role="tablist" aria-label="Console views" style="display:contents">
+  <button class="rail-btn" role="tab" data-view="overview" aria-selected="true" aria-controls="view-overview">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg><span>Overview</span>
+  </button>
+  <button class="rail-btn" role="tab" data-view="units" aria-selected="false" aria-controls="view-units">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="17" height="10" rx="2.5"/><path d="M22 10.5v3"/><path d="M6 10.5v3M10 10.5v3"/></svg><span>Units</span>
+  </button>
+  <button class="rail-btn" role="tab" data-view="control" aria-selected="false" aria-controls="view-control">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7M17 7h3M4 17h3M13 17h7M4 12h13"/><circle cx="14" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/><circle cx="20" cy="12" r="2.4"/></svg><span>Control</span>
+  </button>
+  <button class="rail-btn" role="tab" data-view="power" aria-selected="false" aria-controls="view-power">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19h-20"/></svg><span>Power</span>
+  </button>
+  <button class="rail-btn" role="tab" data-view="energy" aria-selected="false" aria-controls="view-energy">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L5 14h6l-1 8 8-12h-6l1-8z"/></svg><span>Energy</span>
+  </button>
+  <button class="rail-btn" role="tab" data-view="system" aria-selected="false" aria-controls="view-system">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>System</span>
+  </button>
+  </div>
+  <div class="rail-grow"></div>
+  <div class="rail-sep"></div>
+  <button class="rail-btn" id="setBtn" aria-label="Console settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg><span>Settings</span>
+  </button>
+</nav>
+
+<div class="settings" id="setPanel">
+  <h4>Console settings</h4>
+  <div class="set-row">
+    <span>Temperature</span>
+    <div class="mini-seg" id="unitSeg">
+      <button data-u="F" aria-selected="true">°F</button>
+      <button data-u="C" aria-selected="false">°C</button>
+    </div>
+  </div>
+  <div class="set-row"><span>Keep screen awake</span><div class="toggle" id="wakeTog" role="switch" aria-checked="false"></div></div>
+  <div class="set-row"><span>Auto refresh</span><div class="toggle" id="autoTog" role="switch" aria-checked="true"></div></div>
+</div>
+
+<!-- ================= main ================= -->
+<main class="main">
+
+<header class="topbar">
+  <h1 id="viewTitle">Power Overview</h1>
+  <div class="sys-state"><span class="dot pulse" id="sysDot"></span><span id="sysTxt">connecting…</span></div>
+  <div class="spacer"></div>
+  <div class="pills">
+    <div class="pill">
+      <div class="pill-ico" id="solarIco" style="color:var(--faint)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
+      </div>
+      <div class="pill-txt"><div class="k">Solar status</div><div class="v" id="solarStat">—</div></div>
+    </div>
+    <div class="pill-div"></div>
+    <div class="pill">
+      <div class="pill-ico" id="chgIco" style="color:var(--faint)">
+        <svg viewBox="0 0 24 24"><path d="M13 2L5 14h6l-1 8 8-12h-6l1-8z"/></svg>
+      </div>
+      <div class="pill-txt"><div class="k">Charging status</div><div class="v" id="chgStat">—</div></div>
+    </div>
+  </div>
+  <div class="pill-div"></div>
+  <div class="clock"><div class="t" id="clockT">—</div><div class="s" id="clockS">—</div></div>
+  <button class="icon-btn" id="refreshBtn" aria-label="Refresh now">
+    <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 4v7h-7"/></svg>
+  </button>
+</header>
+
+<!-- ============ OVERVIEW ============ -->
+<section class="view active" id="view-overview">
+  <div class="marquee">
+      <div class="bank-read">
+        <div class="k">Battery</div>
+        <div class="big" id="bankPct">—</div>
+        <div class="sub" id="bankSub"></div>
+      </div>
+      <div class="bank-stack">
+        <div class="cells">
+          <div class="cellwrap" id="bankCells"></div>
+          <div class="cellcap"></div>
+        </div>
+        <!-- direction, rate and time remaining, in words — the "and then?" that
+             the percentage alone can't answer from across the box -->
+        <div class="bank-state" id="bankState"></div>
+      </div>
+  </div>
+
+  <!-- the stage reads as the power flows: everything charging the rig on the
+       left (solar, shore), the truck storing it, everything drawing on the
+       right. Shore lives on the INPUT side because shore power is a source. -->
+  <div class="stage">
+    <div class="panel panel-in" id="wingSun">
+      <div class="panel-t">Input</div>
+      <div class="panel-k"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.4"/><path d="M12 3.2v2.2M12 18.6v2.2M3.2 12h2.2M18.6 12h2.2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/></svg>Solar in</div>
+      <div class="panel-v" id="oSolar">—</div>
+      <div class="prows">
+        <div class="wrow"><span class="rlbl">Array A</span><b id="wSolA">—</b></div>
+        <div class="wrow"><span class="rlbl">Array B</span><b id="wSolB">—</b></div>
+        <div class="wrow rule"><span class="rlbl">Today</span><b id="wSolToday">—</b></div>
+        <div class="wrow rule"><span class="rlbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 3.5V8M14.5 3.5V8"/><path d="M7.5 8h9v3.5a4.5 4.5 0 0 1-9 0z"/><path d="M12 16v4.5"/></svg>Shore</span><b id="ldSh">—</b></div>
+      </div>
+    </div>
+    <div class="stage-truck">
+      <svg viewBox="0 79 1000 504" id="sch" role="img"
+           aria-label="The rig: both battery banks on the truck with live charge and power flow"></svg>
+    </div>
+    <div class="panel panel-out" id="wingLoad">
+      <div class="panel-t">Output</div>
+      <div class="panel-k"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 3-7 11h5l-1 7 7-11h-5z"/></svg>Power out</div>
+      <div class="panel-v" id="oLoad">—</div>
+      <div class="prows">
+        <div class="wrow"><span class="rlbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6v7.2"/><path d="M16.9 6.2a7 7 0 1 1-9.8 0"/></svg>A/C outlets</span><b id="ldAc">—</b></div>
+        <div class="wrow"><span class="rlbl"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="19" r="1.6"/><path d="M12 17.4V4.6"/><path d="m9.9 6.8 2.1-2.6 2.1 2.6"/><path d="M12 13.8 8.6 11.6V9.4"/><rect x="7.5" y="6.6" width="2.2" height="2.2"/><path d="M12 15.6 15.4 13.4V11.2"/><circle cx="15.4" cy="9.9" r="1.2"/></svg>12 V + USB</span><b id="ldDc">—</b></div>
+        <div class="wrow rule"><span class="rlbl">Backup</span><b id="oRun">—</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ribbon">
+    <div class="ribbon-h">
+      <span class="ribbon-k">Charge · last 24 h</span>
+    </div>
+    <div class="chart-wrap" id="chartSocMini"></div>
+  </div>
+</section>
+
+<!-- ============ UNITS ============ -->
+<section class="view" id="view-units">
+  <div class="units">
+    <div class="card unit unit-b">
+      <h2><span class="swatch"></span>Unit B <span class="role">donor · standalone</span><span class="fresh-chip" id="freshB" hidden></span></h2>
+      <div class="unit-top">
+        <div class="gauge-wrap">
+          <svg class="gauge" viewBox="0 0 150 118" id="gaugeB" role="img" aria-label="Unit B state of charge"></svg>
+          <div class="gauge-cap" id="capB"></div>
+        </div>
+        <div class="state" id="stateB"></div>
+      </div>
+      <div class="grid" id="gridB"></div>
+      <div class="packs" id="packsB"></div>
+    </div>
+    <div class="conduit">
+      <div class="lbl">B → A<br>transfer</div>
+      <svg width="74" height="26" viewBox="0 0 74 26">
+        <line class="flow" id="condLine" x1="2" y1="13" x2="63" y2="13"/>
+        <path class="head" id="condArrow" d="M63 6 L72 13 L63 20 Z"/>
+      </svg>
+      <div class="w" id="condW">idle</div>
+    </div>
+    <div class="card unit unit-a">
+      <h2><span class="swatch"></span>Unit A <span class="role">house · runs the a/c</span><span class="fresh-chip" id="freshA" hidden></span></h2>
+      <div class="unit-top">
+        <div class="gauge-wrap">
+          <svg class="gauge" viewBox="0 0 150 118" id="gaugeA" role="img" aria-label="Unit A state of charge"></svg>
+          <div class="gauge-cap" id="capA"></div>
+        </div>
+        <div class="state" id="stateA"></div>
+      </div>
+      <div class="grid" id="gridA"></div>
+      <div class="packs" id="packsA"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTROL ============ -->
+<section class="view" id="view-control">
+  <div class="card" id="balCard" style="margin-bottom:12px">
+    <div class="card-h"><h3>Auto balance <span class="note">— B→A transfer automation</span></h3>
+      <span class="bal-state" id="balState">—</span></div>
+    <div class="ctl-row">
+      <div class="lbl">Enabled</div>
+      <div class="toggle" id="balEnable" role="switch" aria-checked="false"></div>
+      <div class="hint">Turns Unit B's AC outlets on when B reaches the start level — B's output feeds
+        A's input, so the transfer begins immediately. Off again at the stop level, then it waits for
+        the next fill. How hard A pulls is set by <b>AC Charge Speed</b> on Unit A below (200–1800 W).
+        Manual moves are respected: flip B's AC Output off yourself and the balancer idles until the
+        next fill.</div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Start transfer at</div>
+      <div class="ctl-slider">
+        <input type="range" id="balStart" min="80" max="100" step="1">
+        <span class="ctl-val" id="balStart-val">—</span></div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Stop transfer at</div>
+      <div class="ctl-slider">
+        <input type="range" id="balStop" min="20" max="95" step="1">
+        <span class="ctl-val" id="balStop-val">—</span></div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Emergency fallback</div>
+      <div class="toggle" id="emgEnable" role="switch" aria-checked="false"></div>
+      <div class="hint">If Unit A falls to the rescue level, B's AC outlets are forced on no matter
+        how empty B is, and stay on — ignoring the stop level above — until A climbs back to the
+        stand-down level or B hits its floor. B is never drained below the floor.</div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Rescue A at</div>
+      <div class="ctl-slider">
+        <input type="range" id="emgATrig" min="5" max="40" step="1">
+        <span class="ctl-val" id="emgATrig-val">—</span></div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Stand down at</div>
+      <div class="ctl-slider">
+        <input type="range" id="emgAClear" min="10" max="60" step="1">
+        <span class="ctl-val" id="emgAClear-val">—</span></div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Never drain B below</div>
+      <div class="ctl-slider">
+        <input type="range" id="emgBFloor" min="5" max="50" step="1">
+        <span class="ctl-val" id="emgBFloor-val">—</span></div>
+    </div>
+    <div class="ctl-note" id="balNote">…</div>
+  </div>
+  <div class="ctl-units">
+    <div class="card unit unit-b ctl-card" id="ctlCardB">
+      <h2><span class="swatch"></span>Unit B <span class="role">donor · transfer switch</span><span class="off-badge" id="ctlOffB" hidden title="EcoFlow's cloud reports this unit disconnected — the flag can lag; commands may still work but will fail loudly if not">cloud link down</span><span class="fresh-chip" id="ctlFreshB" hidden></span></h2>
+      <div id="ctlB"></div>
+    </div>
+    <div class="card unit unit-a ctl-card" id="ctlCardA">
+      <h2><span class="swatch"></span>Unit A <span class="role">house · runs the a/c</span><span class="off-badge" id="ctlOffA" hidden title="EcoFlow's cloud reports this unit disconnected — the flag can lag; commands may still work but will fail loudly if not">cloud link down</span><span class="fresh-chip" id="ctlFreshA" hidden></span></h2>
+      <div id="ctlA"></div>
+    </div>
+  </div>
+  <div class="card" id="xbCard" style="margin-top:12px;display:none">
+    <div class="card-h"><h3>Extra battery <span class="note">— attached to unit A · telemetry only</span></h3></div>
+    <div class="grid" style="grid-template-columns:repeat(4,1fr);margin:13px 16px 12px" id="xbGrid"></div>
+    <div class="ctl-note">The EcoFlow API exposes no independent settings for expansion packs —
+      charge ceiling and discharge floor on Unit A govern the whole bank, Extra Battery included.</div>
+  </div>
+</section>
+
+<!-- ============ POWER ============ -->
+<section class="view" id="view-power">
+  <div class="rangebar">
+    <div class="seg" id="rangeTabs" role="tablist">
+      <button role="tab" data-range="24h" aria-selected="true">24 Hours</button>
+      <button role="tab" data-range="7d" aria-selected="false">7 Days</button>
+      <button role="tab" data-range="30d" aria-selected="false">30 Days</button>
+    </div>
+    <div class="cov" id="covNote"></div>
+  </div>
+  <div class="stack">
+    <div class="card">
+      <div class="card-h"><h3>Power flow <span class="note" id="powerNote"></span></h3>
+        <div class="legend">
+          <span><i style="background:var(--a)"></i>Solar A</span>
+          <span><i style="background:var(--b)"></i>Solar B</span>
+          <span><i class="ln" style="background:var(--load)"></i>House load</span>
+          <span><i class="ln" style="background:var(--accent)"></i>B→A transfer</span>
+        </div>
+      </div>
+      <div class="chart-wrap" id="chartPower"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>State of charge</h3>
+        <div class="legend"><span><i style="background:var(--a)"></i>Unit A</span><span><i style="background:var(--b)"></i>Unit B</span></div>
+      </div>
+      <div class="chart-wrap" id="chartSoc"></div>
+    </div>
+    <div class="stat-row" id="powerStats"></div>
+  </div>
+</section>
+
+<!-- ============ ENERGY ============ -->
+<section class="view" id="view-energy">
+  <div class="rangebar">
+    <div class="seg" id="rangeTabs2" role="tablist">
+      <button role="tab" data-range="24h" aria-selected="true">24 Hours</button>
+      <button role="tab" data-range="7d" aria-selected="false">7 Days</button>
+      <button role="tab" data-range="30d" aria-selected="false">30 Days</button>
+    </div>
+    <div class="cov" id="covNote2"></div>
+  </div>
+  <div class="stack">
+    <div class="stat-row" id="energyStats"></div>
+    <div class="card">
+      <div class="card-h"><h3>Daily energy <span class="note">— harvested vs used</span></h3>
+        <div class="legend">
+          <span><i style="background:var(--a)"></i>Solar A</span>
+          <span><i style="background:var(--b)"></i>Solar B</span>
+          <span><i style="background:var(--load)"></i>Used (AC+DC)</span>
+          <span><i style="background:var(--accent)"></i>Transfer B→A</span>
+        </div>
+      </div>
+      <div class="chart-wrap" id="chartDaily"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>Typical day <span class="note">— average by hour</span></h3>
+        <div class="legend"><span><i style="background:var(--a)"></i>Solar</span><span><i class="ln" style="background:var(--load)"></i>Load</span></div>
+      </div>
+      <div class="chart-wrap" id="chartProfile"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SYSTEM ============ -->
+<section class="view" id="view-system">
+  <div class="sub-head" style="margin-top:0">Lifetime counters</div>
+  <div class="stat-row" id="lifetime"></div>
+  <div class="sub-head">Diagnostics</div>
+  <div class="two-col" id="diag"></div>
+  <div class="sub-head">Logging</div>
+  <div class="stat-row" id="logStats"></div>
+  <footer id="foot"></footer>
+</section>
+</main>
+</div>
+
+<div class="sheet-veil" id="sheetVeil">
+  <div class="sheet">
+    <h4><svg viewBox="0 0 24 24"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v.5"/></svg><span id="sheetTitle">Confirm</span></h4>
+    <p id="sheetMsg"></p>
+    <div class="sheet-btns">
+      <button class="btn" id="sheetNo">Cancel</button>
+      <button class="btn btn-go" id="sheetGo">Confirm</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toastBox" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = { A: css("--a"), B: css("--b"), load: css("--load"), xfer: css("--accent"), ink: css("--ink") };
+
+const VIEW_TITLE = {
+  overview: "Power Overview", units: "Unit Detail", control: "Manual Control",
+  power: "Power History", energy: "Energy Ledger", system: "System & Diagnostics",
+};
+
+const state = {
+  view: "overview", range: "24h", live: null, hist: null, hist24: null,
+  tempUnit: localStorage.getItem("tempUnit") || "F",
+  auto: localStorage.getItem("auto") !== "0",
+  railOpen: localStorage.getItem("railOpen") === "1",
+  wake: false, lastOk: 0,
+};
+let wakeLock = null;
+
+/* ---------- formatting ---------- */
+const fmtW = w => w == null ? "—" : Math.round(w).toLocaleString() + " W";
+const fmtWh = wh => wh == null ? "—" :
+  Math.abs(wh) >= 1000 ? (wh / 1000).toFixed(Math.abs(wh) >= 10000 ? 1 : 2) + " kWh"
+                       : Math.round(wh) + " Wh";
+function temp(c) {
+  if (c == null) return "—";
+  return state.tempUnit === "F" ? Math.round(c * 9 / 5 + 32) + "°F" : Math.round(c) + "°C";
+}
+function fmtMin(m) {
+  if (!m || m <= 0) return null;
+  const h = Math.floor(m / 60);
+  return h > 0 ? `${h}h ${String(m % 60).padStart(2, "0")}m` : `${m}m`;
+}
+const dayLabel = iso => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], { weekday: "short", month: "numeric", day: "numeric" });
+};
+
+/* ---------- chart core (unchanged geometry, restyled chrome) ---------- */
+const NICE = [[1, 4], [1.5, 3], [2, 4], [2.5, 5], [3, 3], [4, 4], [5, 5], [6, 3], [8, 4], [10, 4]];
+function niceTop(vMax, fixed) {
+  if (fixed) return [fixed, 4];
+  const raw = Math.max(10, vMax * 1.12);
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  const hit = NICE.find(([m]) => m * pow >= raw) || [10, 4];
+  return [hit[0] * pow, hit[1]];
+}
+function timeFmt(range) {
+  if (range === "24h") return t => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (range === "7d") return t => new Date(t).toLocaleDateString([], { weekday: "short", hour: "numeric" });
+  return t => new Date(t).toLocaleDateString([], { month: "numeric", day: "numeric" });
+}
+function emptyNote(wrap, title, detail) {
+  wrap.innerHTML = `<div class="empty-note"><b>${title}</b>${detail}</div>`;
+}
+
+/** Pixel size of the chart's own box.
+    Every chart used to draw into a fixed 760-wide viewBox with
+    preserveAspectRatio="none", so a 560px-wide card squashed all of its axis
+    labels to 74% width. Drawing at the container's real pixel size instead
+    means the viewBox maps 1:1 and the type comes out undistorted.
+    `fill` charts (Overview) take their height from the space the grid left them
+    rather than a constant, which is what lets that screen fit any tablet. */
+/** How many x-axis intervals this width can hold without the timestamps
+    colliding. 170px per label: the axis runs at 14px on Overview now, so
+    "08:20 PM" is about 70px wide and the old 130px budget overlapped. */
+function xTickCount(W) { return Math.min(6, Math.max(2, Math.floor(W / 170))); }
+
+function chartBox(wrap, fallbackH, fill) {
+  const W = Math.max(320, Math.round(wrap.clientWidth || 760));
+  let H = fallbackH;
+  if (fill) {
+    const h = wrap.clientHeight;
+    if (h > 40) H = Math.round(h);
+  }
+  return { W, H: Math.max(120, H) };
+}
+/** Shared frame: grid, y labels, x labels. Returns scales + svg string parts. */
+function frame(W, H, top, yTicks, xs, xLabels, unitSuffix) {
+  const L = 44, R = 14, T = 12, B = 26;
+  const y = v => T + (H - T - B) * (1 - v / top);
+  let g = "";
+  for (let i = 0; i <= yTicks; i++) {
+    const v = top * i / yTicks, yy = y(v);
+    g += `<line class="gridline" x1="${L}" x2="${W - R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}"/>`
+       + `<text class="axis" x="${L - 7}" y="${(yy + 3.5).toFixed(1)}" text-anchor="end">${v >= 1000 ? (v / 1000) + "k" : Math.round(v)}</text>`;
+  }
+  // The first and last labels sit on the plot edges, where a centred anchor puts
+  // half the string outside the viewBox — "08:05 PM" was rendering as "08:05".
+  // Anchor those two inward instead.
+  for (const { x, label } of xLabels) {
+    const anchor = x <= L + 24 ? "start" : x >= W - R - 24 ? "end" : "middle";
+    const px = anchor === "start" ? L : anchor === "end" ? W - R : x;
+    g += `<text class="axis" x="${px.toFixed(1)}" y="${H - 9}" text-anchor="${anchor}">${label}</text>`;
+  }
+  return { L, R, T, B, y, grid: g };
+}
+function attachTooltip(wrap, svg, hit) {
+  const tt = wrap.querySelector(".tooltip"), xh = wrap.querySelector(".xhair");
+  const move = ev => {
+    const rect = svg.getBoundingClientRect();
+    const pt = ev.touches ? ev.touches[0] : ev;
+    const res = hit((pt.clientX - rect.left) * svg.viewBox.baseVal.width / rect.width);
+    if (!res) { tt.style.display = "none"; if (xh) xh.setAttribute("visibility", "hidden"); return; }
+    if (xh) { xh.setAttribute("visibility", "visible"); xh.setAttribute("x1", res.x); xh.setAttribute("x2", res.x); }
+    tt.innerHTML = res.html;
+    tt.style.display = "block";
+    const px = res.x * rect.width / svg.viewBox.baseVal.width;
+    tt.style.left = Math.max(4, Math.min(px + 14, rect.width - tt.offsetWidth - 4)) + "px";
+    tt.style.top = "8px";
+  };
+  svg.addEventListener("mousemove", move);
+  svg.addEventListener("touchstart", move, { passive: true });
+  svg.addEventListener("touchmove", move, { passive: true });
+  const hide = () => { tt.style.display = "none"; if (xh) xh.setAttribute("visibility", "hidden"); };
+  svg.addEventListener("mouseleave", hide);
+  svg.addEventListener("touchend", hide);
+}
+
+/** Solar A + solar B stacked, house load as a line. Shared by several charts. */
+function powerRows(hist) {
+  const sa = hist.series.A, sb = hist.series.B;
+  const t = sa.t.length >= sb.t.length ? sa.t : sb.t;
+  if (!t || t.length < 2) return null;
+  const bAt = new Map(sb.t.map((tt, i) => [tt, i]));
+  return t.map((tt, i) => {
+    const j = bAt.has(tt) ? bAt.get(tt) : -1;
+    const solA = sa.solar_w[i] ?? 0;
+    const solB = j >= 0 ? (sb.solar_w[j] ?? 0) : 0;
+    // Load is what leaves the boxes: watts_out also counts A's internal
+    // main->Extra pack transfer while charging (up to ~550 W), and B's AC
+    // output is hard-wired into A's input — a transfer, not house load.
+    // Old rows predate ac_out_w/dc_out_w; fall back to watts_out there.
+    const loadA = sa.ac_out_w[i] != null
+      ? sa.ac_out_w[i] + (sa.dc_out_w[i] ?? 0)
+      : (sa.watts_out[i] ?? 0);
+    const dcB = j >= 0 ? (sb.dc_out_w[j] ?? 0) : 0;
+    const xfer = j >= 0 ? (sb.ac_out_w[j] ?? 0) : 0;
+    return { t: tt, solA, solB, xfer, load: loadA + dcB };
+  });
+}
+
+/* ---------- power chart: stacked solar areas + load line ---------- */
+function drawPower(wrap, hist, opts = {}) {
+  const { W, H } = chartBox(wrap, opts.height || 260);
+  const rows = powerRows(hist);
+  if (!rows) {
+    return emptyNote(wrap, "Not enough samples yet",
+      "The poller logs every 30 s — this fills in as data arrives.");
+  }
+  const vMax = Math.max(...rows.map(r => Math.max(r.solA + r.solB, r.load, r.xfer)));
+  const [top, yTicks] = niceTop(vMax);
+  const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
+  const fmt = timeFmt(hist.range);
+
+  const L = 44, R = 14;
+  const x = tt => L + (W - L - R) * (tt - t0) / Math.max(1, t1 - t0);
+  const nLab = xTickCount(W);
+  const xLabels = Array.from({ length: nLab + 1 }, (_, i) => {
+    const tt = t0 + (t1 - t0) * i / nLab;
+    return { x: x(tt), label: fmt(tt) };
+  });
+  const f = frame(W, H, top, yTicks, x, xLabels);
+
+  const area = (key, base) => {
+    const up = rows.map(r => `${x(r.t).toFixed(1)},${f.y(base(r) + r[key]).toFixed(1)}`);
+    const down = rows.map(r => `${x(r.t).toFixed(1)},${f.y(base(r)).toFixed(1)}`).reverse();
+    return `<polygon points="${up.concat(down).join(" ")}"/>`;
+  };
+  const loadLine = rows.map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)} ${f.y(r.load).toFixed(1)}`).join(" ");
+  const hasXfer = rows.some(r => r.xfer > 1);
+  const xferLine = hasXfer
+    ? rows.map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)} ${f.y(r.xfer).toFixed(1)}`).join(" ")
+    : "";
+
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">
+    ${f.grid}
+    <g fill="${C.A}" fill-opacity=".55" stroke="${C.A}" stroke-width="1">${area("solA", () => 0)}</g>
+    <g fill="${C.B}" fill-opacity=".55" stroke="${C.B}" stroke-width="1">${area("solB", r => r.solA)}</g>
+    ${hasXfer ? `<path d="${xferLine}" fill="none" stroke="${C.xfer}" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ""}
+    <path d="${loadLine}" fill="none" stroke="${C.load}" stroke-width="2" stroke-linejoin="round"/>
+    <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
+  </svg><div class="tooltip"></div>`;
+
+  const svg = wrap.querySelector("svg");
+  attachTooltip(wrap, svg, mx => {
+    let best = rows[0];
+    for (const r of rows) if (Math.abs(x(r.t) - mx) < Math.abs(x(best.t) - mx)) best = r;
+    const net = best.solA + best.solB - best.load;
+    return {
+      x: x(best.t),
+      html: `<div class="tt-t">${new Date(best.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>`
+        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar A <b>${Math.round(best.solA)} W</b></div>`
+        + `<div class="tt-row"><i style="background:${C.B}"></i>Solar B <b>${Math.round(best.solB)} W</b></div>`
+        + `<div class="tt-row"><i style="background:${C.load}"></i>Load <b>${Math.round(best.load)} W</b></div>`
+        + (best.xfer > 1 ? `<div class="tt-row"><i style="background:${C.xfer}"></i>B→A transfer <b>${Math.round(best.xfer)} W</b></div>` : "")
+        + `<div class="tt-row" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px">`
+        + `<span style="color:var(--faint)">Net</span><b style="color:${net >= 0 ? css("--good") : css("--warn")}">`
+        + `${net >= 0 ? "+" : "−"}${Math.abs(Math.round(net))} W</b></div>`,
+    };
+  });
+}
+
+/* ---------- SOC chart ---------- */
+function drawSoc(wrap, hist, opts = {}) {
+  const { W, H } = chartBox(wrap, opts.height || 250, opts.fill);
+  const pts = {};
+  let any = false;
+  for (const u of ["A", "B"]) {
+    const s = hist.series[u];
+    pts[u] = s.t.map((t, i) => ({ t, v: s.soc[i] })).filter(p => p.v != null);
+    if (pts[u].length) any = true;
+  }
+  if (!any) return emptyNote(wrap, "No state-of-charge samples yet", "Give the poller a few minutes.");
+  const all = [...pts.A, ...pts.B];
+  const t0 = Math.min(...all.map(p => p.t)), t1 = Math.max(...all.map(p => p.t)) || t0 + 1;
+  const L = 44, R = 14;
+  const x = t => L + (W - L - R) * (t - t0) / Math.max(1, t1 - t0);
+  const fmt = timeFmt(hist.range);
+  const nLab = xTickCount(W);
+  const xLabels = Array.from({ length: nLab + 1 }, (_, i) => {
+    const t = t0 + (t1 - t0) * i / nLab;
+    return { x: x(t), label: fmt(t) };
+  });
+  const f = frame(W, H, 100, 4, x, xLabels);
+  // opts.colors overrides the series palette (Overview's ribbon speaks two
+  // brightnesses of the truck blue); opts.endLabels names each line where it
+  // ends, replacing a legend the eye would have to cross-reference.
+  const col = opts.colors || C;
+  let lines = "", ends = "";
+  const endPts = [];
+  for (const u of ["A", "B"]) {
+    if (!pts[u].length) continue;
+    const d = pts[u].map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${f.y(p.v).toFixed(1)}`).join(" ");
+    const last = pts[u][pts[u].length - 1];
+    lines += `<path d="${d}" fill="none" stroke="${col[u]}" stroke-width="2" stroke-linejoin="round"/>`;
+    ends += `<circle cx="${x(last.t).toFixed(1)}" cy="${f.y(last.v).toFixed(1)}" r="3.5" fill="${col[u]}" stroke="var(--surface)" stroke-width="2"/>`;
+    endPts.push({ u, x: x(last.t), y: f.y(last.v) });
+  }
+  let tags = "";
+  if (opts.endLabels) {
+    // each tag clears its own line: the upper line is named above itself, the
+    // lower below, so neither tag is struck through when the lines end close
+    endPts.sort((a, b) => a.y - b.y);
+    tags = endPts.map((e, i) => {
+      const base = i === 0 ? e.y - 10 : e.y + 20;
+      return `<text class="soc-tag" x="${(e.x - 10).toFixed(1)}" y="${Math.min(H - 30, Math.max(24, base)).toFixed(1)}" text-anchor="end" fill="${col[e.u]}">Unit ${e.u}</text>`;
+    }).join("");
+  }
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">
+    ${f.grid}${lines}${ends}${tags}
+    <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
+  </svg><div class="tooltip"></div>`;
+  attachTooltip(wrap, wrap.querySelector("svg"), mx => {
+    let rows = "", tx = null;
+    for (const u of ["A", "B"]) {
+      if (!pts[u].length) continue;
+      let best = pts[u][0];
+      for (const p of pts[u]) if (Math.abs(x(p.t) - mx) < Math.abs(x(best.t) - mx)) best = p;
+      tx = tx ?? best.t;
+      rows += `<div class="tt-row"><i style="background:${col[u]}"></i>Unit ${u} <b>${best.v.toFixed(1)}%</b></div>`;
+    }
+    return rows ? { x: x(tx), html: `<div class="tt-t">${new Date(tx).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>${rows}` } : null;
+  });
+}
+
+/* ---------- daily energy bars ---------- */
+function drawDaily(wrap, hist) {
+  const dA = hist.daily.A, dB = hist.daily.B;
+  const days = [...new Set([...dA.map(d => d.date), ...dB.map(d => d.date)])].sort();
+  if (!days.length) {
+    return emptyNote(wrap, "No completed energy readings yet",
+      "Daily totals come from the battery's lifetime Wh counters — the first full day appears once logging spans one.");
+  }
+  const byA = Object.fromEntries(dA.map(d => [d.date, d])), byB = Object.fromEntries(dB.map(d => [d.date, d]));
+  const rows = days.map(date => {
+    const a = byA[date] || {}, b = byB[date] || {};
+    // B's AC output is hard-wired into A's input: the matched Wh are a
+    // transfer (still in the system), not consumption on either side.
+    const xfer = Math.min(b.ac_out_wh || 0, a.ac_in_wh || 0);
+    return {
+      date,
+      solA: a.solar_wh || 0, solB: b.solar_wh || 0,
+      used: (a.ac_out_wh || 0) + (a.dc_out_wh || 0) + (b.dc_out_wh || 0),
+      xfer,
+    };
+  });
+  const { W, H } = chartBox(wrap, 260);
+  const L = 44, R = 14;
+  const vMax = Math.max(...rows.map(r => Math.max(r.solA + r.solB, r.used, r.xfer)), 100);
+  const [top, yTicks] = niceTop(vMax);
+  const slot = (W - L - R) / rows.length;
+  const barW = Math.min(30, slot * 0.24);
+  const gap = 3;
+  const xLabels = rows.map((r, i) => ({ x: L + slot * (i + 0.5), label: dayLabel(r.date) }));
+  const f = frame(W, H, top, yTicks, null, rows.length <= 10 ? xLabels : xLabels.filter((_, i) => i % Math.ceil(rows.length / 8) === 0));
+
+  const rect = (x, v0, v1, fill, round) => {
+    const y1 = f.y(v1), y0 = f.y(v0), h = Math.max(0, y0 - y1);
+    if (h < 0.5) return "";
+    const r = round ? Math.min(4, h / 2, barW / 2) : 0;
+    return `<rect x="${x.toFixed(1)}" y="${y1.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="${r}" fill="${fill}"/>`;
+  };
+  let bars = "";
+  rows.forEach((r, i) => {
+    const cx = L + slot * (i + 0.5);
+    const xh = cx - 1.5 * barW - gap, xu = cx - barW / 2, xx = cx + barW / 2 + gap;
+    bars += rect(xh, 0, r.solA, C.A, r.solB < 1);
+    if (r.solB > 0) bars += rect(xh, r.solA + top * 0.004, r.solA + r.solB, C.B, true); // 2px surface gap
+    bars += rect(xu, 0, r.used, C.load, true);
+    if (r.xfer > 0) bars += rect(xx, 0, r.xfer, C.xfer, true);
+  });
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">${f.grid}${bars}</svg><div class="tooltip"></div>`;
+  attachTooltip(wrap, wrap.querySelector("svg"), mx => {
+    const i = Math.floor((mx - L) / slot);
+    if (i < 0 || i >= rows.length) return null;
+    const r = rows[i], harvest = r.solA + r.solB, net = harvest - r.used;
+    return {
+      x: L + slot * (i + 0.5),
+      html: `<div class="tt-t">${dayLabel(r.date)}</div>`
+        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar A <b>${fmtWh(r.solA)}</b></div>`
+        + `<div class="tt-row"><i style="background:${C.B}"></i>Solar B <b>${fmtWh(r.solB)}</b></div>`
+        + `<div class="tt-row"><i style="background:${C.load}"></i>Used <b>${fmtWh(r.used)}</b></div>`
+        + (r.xfer > 0 ? `<div class="tt-row"><i style="background:${C.xfer}"></i>Transfer B→A <b>${fmtWh(r.xfer)}</b></div>` : "")
+        + `<div class="tt-row" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px">`
+        + `<span style="color:var(--faint)">Net</span><b style="color:${net >= 0 ? css("--good") : css("--warn")}">${net >= 0 ? "+" : "−"}${fmtWh(Math.abs(net))}</b></div>`,
+    };
+  });
+}
+
+/* ---------- hourly profile ---------- */
+function drawProfile(wrap, hist) {
+  const pa = hist.profile.A, pb = hist.profile.B;
+  const rows = pa.map((h, i) => ({
+    hour: h.hour,
+    solar: (h.solar_w || 0) + (pb[i]?.solar_w || 0),
+    // B's AC output is the B→A transfer, not house load
+    load: (h.load_w || 0) + Math.max(0, (pb[i]?.load_w || 0) - (pb[i]?.ac_w || 0)),
+  }));
+  if (!rows.some(r => r.solar || r.load)) {
+    return emptyNote(wrap, "No hourly shape yet", "This averages each hour of the day across the selected range.");
+  }
+  const { W, H } = chartBox(wrap, 240);
+  const L = 44, R = 14;
+  const vMax = Math.max(...rows.map(r => Math.max(r.solar, r.load)), 50);
+  const [top, yTicks] = niceTop(vMax);
+  const slot = (W - L - R) / 24;
+  const barW = Math.min(20, slot * 0.62);
+  const xLabels = rows.filter(r => r.hour % 3 === 0)
+    .map(r => ({ x: L + slot * (r.hour + 0.5), label: (r.hour % 12 || 12) + (r.hour < 12 ? "a" : "p") }));
+  const f = frame(W, H, top, yTicks, null, xLabels);
+  let bars = "", line = "";
+  rows.forEach(r => {
+    const cx = L + slot * (r.hour + 0.5);
+    const y1 = f.y(r.solar), h = Math.max(0, f.y(0) - y1);
+    if (h > 0.5) bars += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="${Math.min(4, h / 2)}" fill="${C.A}" fill-opacity=".85"/>`;
+    line += `${r.hour ? "L" : "M"}${cx.toFixed(1)} ${f.y(r.load).toFixed(1)}`;
+  });
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">${f.grid}${bars}
+    <path d="${line}" fill="none" stroke="${C.load}" stroke-width="2" stroke-linejoin="round"/>
+    <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
+  </svg><div class="tooltip"></div>`;
+  attachTooltip(wrap, wrap.querySelector("svg"), mx => {
+    const i = Math.floor((mx - L) / slot);
+    if (i < 0 || i > 23) return null;
+    const r = rows[i];
+    const h12 = (r.hour % 12 || 12) + (r.hour < 12 ? " AM" : " PM");
+    return {
+      x: L + slot * (i + 0.5),
+      html: `<div class="tt-t">${h12} average</div>`
+        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar <b>${Math.round(r.solar)} W</b></div>`
+        + `<div class="tt-row"><i style="background:${C.load}"></i>Load <b>${Math.round(r.load)} W</b></div>`,
+    };
+  });
+}
+
+/* ---------- gauges ---------- */
+function polar(cx, cy, r, deg) {
+  const a = (deg - 90) * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+function arcPath(cx, cy, r, a0, a1) {
+  const [x0, y0] = polar(cx, cy, r, a0), [x1, y1] = polar(cx, cy, r, a1);
+  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+const socColor = soc => soc < 10 ? css("--crit") : soc < 25 ? css("--warn") : css("--good");
+
+/* The ring carries the percentage and nothing else. The capacity line used to be
+   a <text> at y=91 inside this SVG: ~126px of monospace centred on x=75, where
+   the r=62 arc crosses x≈14 and x≈136 — so it ran straight through the stroke at
+   both ends on both units. It lives in .gauge-cap under the ring now. */
+function renderGauge(svg, unit, u) {
+  const soc = u.soc ?? 0;
+  const color = soc < 10 ? css("--crit") : soc < 25 ? css("--warn") : C[unit];
+  const A0 = -122, A1 = 122;
+  const fill = A0 + (A1 - A0) * Math.min(Math.max(soc, 0), 100) / 100;
+  svg.innerHTML = `
+    <path d="${arcPath(75, 75, 62, A0, A1)}" fill="none" stroke="var(--surface3)" stroke-width="10" stroke-linecap="round"/>
+    ${soc > 0.4 ? `<path d="${arcPath(75, 75, 62, A0, fill)}" fill="none" stroke="${color}" stroke-width="10"
+      stroke-linecap="round" style="filter:drop-shadow(0 0 6px ${color}55)"/>` : ""}
+    <text class="g-soc" x="75" y="88" text-anchor="middle">${u.soc == null ? "—" : u.soc.toFixed(1)}<tspan class="g-pct">%</tspan></text>`;
+}
+
+/* =================================================================
+   RIG SINGLE-LINE SCHEMATIC
+   Static chrome is drawn once; only the flow classes and the live
+   watt readouts are touched on refresh.
+   ================================================================= */
+/* Coordinates are anchored to the truck photo: the crop (90,180)–(1360,820) of
+   the 1448×1086 reference maps to (0,79)–(1000,583) in this viewBox, so the
+   box interior is roughly x 346–937, y 150–433, roof line y≈138, ground y≈567. */
+const SCH = {
+  bankB: [356, 470], bankA: [556, 800],     // unit frames: B holds one pack, A two
+  bankY: [176, 404],                         // frames fill the box interior top to bottom
+  roofY: 138,                                // photo's box-top rail: solar drops land here
+  outX: 962,                                 // out-flow arrow tip — just inside the box's rear wall
+};
+/* vertical pack-bar band inside a unit frame (drains top-down like a battery) */
+const BARS = { top: 228, bot: 338 };
+
+function bankBox(id, x0, x1, label, sub, packs) {
+  const [y0, y1] = SCH.bankY, w = x1 - x0, cx = (x0 + x1) / 2;
+  const n = packs;
+  const bw = 48, gap = 34;                   // gap leaves room for the pack bond
+  const total = n * bw + (n - 1) * gap;
+  let cells = "";
+  for (let i = 0; i < n; i++) {
+    const bx = cx - total / 2 + i * (bw + gap);
+    cells += `<rect class="sch-detail" x="${(bx + bw / 2 - 10).toFixed(1)}" y="${BARS.top - 8}" width="20" height="6" rx="2"/>`
+           + `<rect class="sch-detail" x="${bx.toFixed(1)}" y="${BARS.top}" width="${bw}" height="${BARS.bot - BARS.top}" rx="7"/>`
+           // y/height here are SVG geometry attributes, not CSS box metrics —
+           // they animate on the compositor and trigger no document reflow, so
+           // the usual "don't animate height" rule doesn't apply.
+           + `<rect id="${id}p${i}" x="${(bx + 3).toFixed(1)}" y="${BARS.bot - 3}" width="${bw - 6}" height="0" rx="4" fill="var(--good)" opacity=".85" style="transition: y .8s var(--ease), height .8s var(--ease)"/>`;
+    // bus bars bond this pack to the previous one — two boxes, one bank
+    if (i) cells += `<rect class="sch-link" x="${(bx - gap + 6).toFixed(1)}" y="${BARS.top + 14}" width="${gap - 12}" height="5" rx="2.5"/>`
+                  + `<rect class="sch-link" x="${(bx - gap + 6).toFixed(1)}" y="${BARS.bot - 24}" width="${gap - 12}" height="5" rx="2.5"/>`;
+  }
+  return `<g>
+    <rect class="sch-box" x="${x0}" y="${y0}" width="${w}" height="${y1 - y0}" rx="12"/>
+    <text class="sch-lbl" x="${x0 + 16}" y="${y0 + 27}">${label}</text>
+    ${cells}
+    <text class="sch-big" id="${id}soc" x="${cx}" y="${y1 - 30}" text-anchor="middle">—</text>
+    <text class="sch-val" id="${id}kwh" x="${cx}" y="${y1 - 9}" text-anchor="middle" fill="var(--muted)">—</text>
+    <text class="sch-tiny" x="${cx}" y="${y1 + 22}" text-anchor="middle">${sub}</text>
+  </g>`;
+}
+
+/** One flow: a polyline path, an arrowhead, and (when placed) a watt label.
+    Taps into the load column pass no label — their row already prints the watts. */
+function flowPath(id, d, headPts, color, labelX, labelY, anchor) {
+  const label = labelY == null ? "" :
+    `<text class="sch-val" id="${id}v" x="${labelX}" y="${labelY}" text-anchor="${anchor || "middle"}" fill="var(--muted)">—</text>`;
+  return `<g style="--fc:${color}">
+    <path class="flow" id="${id}" d="${d}"/>
+    <polygon class="head" id="${id}h" points="${headPts}"/>
+    ${label}
+  </g>`;
+}
+
+function buildSchematic() {
+  const [bA0, bA1] = SCH.bankA, [bB0, bB1] = SCH.bankB;
+  const [y0, y1] = SCH.bankY, midY = (y0 + y1) / 2;
+  const aCx = (bA0 + bA1) / 2, bCx = (bB0 + bB1) / 2;
+
+  // The truck is the neon NPR reference photo, cropped to (90,180)-(1360,820)
+  // and screen-blended so its black field disappears into the page.
+  const truck = `<image class="sch-truck" href="/truck.png" x="0" y="79" width="1000" height="504"/>`;
+
+  // Every flow speaks the truck's own blue — unit identity colors are retired
+  // on this surface (2026-08-05). Status color appears only when shore power
+  // reverses the out-flow (net gain = --good).
+  $("sch").innerHTML = truck
+    + bankBox("bkB", bB0, bB1, "Unit B", "Delta Pro", 1)
+    + bankBox("bkA", bA0, bA1, "Unit A", "Delta Pro + Extra Battery", 2)
+    // solar drops from the roof panels
+    + flowPath("fSolB", `M${bCx} ${SCH.roofY} L${bCx} ${y0 - 24}`, `${bCx - 6},${y0 - 24} ${bCx + 6},${y0 - 24} ${bCx},${y0 - 12}`,
+        "var(--accent)", bCx + 10, SCH.roofY + 30, "start")
+    + flowPath("fSolA", `M${aCx} ${SCH.roofY} L${aCx} ${y0 - 24}`, `${aCx - 6},${y0 - 24} ${aCx + 6},${y0 - 24} ${aCx},${y0 - 12}`,
+        "var(--accent)", aCx + 10, SCH.roofY + 30, "start")
+    // B → A transfer
+    + flowPath("fXfer", `M${bB1} ${midY} L${bA0 - 14} ${midY}`,
+        `${bA0 - 14},${midY - 6} ${bA0 - 14},${midY + 6} ${bA0 - 2},${midY}`,
+        "var(--accent)", (bB1 + bA0) / 2, midY - 12)
+    // out through the rear wall, toward the OUTPUT panel. One line: it marches
+    // outward when the house draws, reverses and turns green when shore power
+    // pushes more in than the loads take out. The panel prints the watts.
+    + flowPath("fOut", `M${bA1} ${midY} L${SCH.outX - 14} ${midY}`,
+        `${SCH.outX - 14},${midY - 7} ${SCH.outX - 14},${midY + 7} ${SCH.outX},${midY}`,
+        "var(--accent)", 0, null);
+}
+
+function setFlow(id, on, label) {
+  const p = $(id), h = $(id + "h"), v = $(id + "v");
+  if (p) p.classList.toggle("on", on);
+  if (h) h.classList.toggle("on", on);
+  if (v) { v.textContent = label; v.setAttribute("fill", on ? css("--ink") : css("--faint")); }
+}
+
+function renderSchematic(A, B, transfer) {
+  const solA = A.solar.w ?? 0, solB = B.solar.w ?? 0;
+  setFlow("fSolB", solB > 3, fmtW(solB));
+  setFlow("fSolA", solA > 3, fmtW(solA));
+  setFlow("fXfer", transfer > 5, transfer > 5 ? fmtW(transfer) : "idle");
+  $("fXferv").classList.toggle("sch-word", !(transfer > 5));
+
+  const acW = A.ac.out_w ?? 0;
+  const dcW = (A.dc.car_w ?? 0) + (A.dc.usb_w ?? 0) + (B.dc.car_w ?? 0) + (B.dc.usb_w ?? 0);
+  // A's AC input also carries the transfer from B; only the excess is shore power
+  const shoreW = Math.max(0, (A.ac.in_w ?? 0) - transfer) + Math.max(0, (B.ac.in_w ?? 0));
+
+  // the out-flow carries the net: loads pull power out, shore pushes it back in
+  const busIn = shoreW > acW + dcW;
+  for (const el of [$("fOut"), $("fOuth")])
+    el.style.setProperty("--fc", busIn ? "var(--good)" : "var(--accent)");
+  $("fOut").classList.toggle("rev", busIn);
+  setFlow("fOut", acW > 5 || dcW > 1 || shoreW > 5);
+
+  for (const [id, u] of [["bkA", A], ["bkB", B]]) {
+    const n = id === "bkA" ? 2 : 1;
+    const H = (BARS.bot - 3) - (BARS.top + 3);   // fillable height inside the bar outline
+    u.packs.forEach((p, i) => {
+      const el = $(id + "p" + i);
+      if (!el) return;
+      const h = H * Math.min(100, Math.max(0, p.soc ?? 0)) / 100;
+      el.setAttribute("height", h.toFixed(1));
+      el.setAttribute("y", (BARS.bot - 3 - h).toFixed(1));   // anchored at the bottom: drains top-down
+      el.setAttribute("fill", socColor(p.soc ?? 0));
+    });
+    // a pack slot with no reported pack shows nothing rather than a stale bar
+    for (let i = u.packs.length; i < n; i++) {
+      const el = $(id + "p" + i);
+      if (el) { el.setAttribute("height", 0); el.setAttribute("y", BARS.bot - 3); }
+    }
+    $(id + "soc").textContent = u.soc == null ? "—" : `${u.soc.toFixed(1)}%`;
+    $(id + "kwh").textContent = fmtWh(u.wh_est);
+  }
+}
+
+/* ---------- live rendering ---------- */
+function transferW(A, B) { return Math.min(B.ac.out_w ?? 0, A.ac.in_w ?? 0); }
+
+/* House load = what actually leaves the rig. B's AC output is hard-wired into
+   A's input, so it is a transfer, not consumption — only B's DC ports count. */
+function houseLoadW(A, B) {
+  return (A.load_w ?? 0) + (B.dc.car_w ?? 0) + (B.dc.usb_w ?? 0);
+}
+
+function stateChip(u) {
+  const charging = (u.in_w ?? 0) > 5;
+  // net against load_w, not out_w: out_w counts the internal main->Extra
+  // transfer, which would read as discharging while the unit is charging
+  const net = (u.in_w ?? 0) - (u.load_w ?? 0);
+  if (charging && net > 5) {
+    const eta = fmtMin(u.chg_remain_min);
+    return `<span class="chip chg"><span class="d"></span>Charging</span>` + (eta ? `<span class="eta">full in <b>${eta}</b></span>` : "");
+  }
+  if ((u.load_w ?? 0) > 5) {
+    const eta = fmtMin(u.dsg_remain_min);
+    return `<span class="chip dsg"><span class="d"></span>Discharging</span>` + (eta ? `<span class="eta">empty in <b>${eta}</b></span>` : "");
+  }
+  return `<span class="chip idle"><span class="d"></span>Idle</span>`;
+}
+const cell = (k, v) => `<div class="cell"><div class="k">${k}</div><div class="v">${v}</div></div>`;
+
+/* "data frozen 12m" chip — shown once the cloud payload hasn't changed for
+   5 min. Under 5 min of no movement is normal (idle unit, calm night). */
+function setFreshChip(el, u) {
+  if (u.source === "ble") {
+    el.hidden = false;
+    el.classList.add("ble");
+    el.textContent = "via bluetooth";
+    el.title = "Cloud link is down — this unit is being read over local Bluetooth.";
+    return;
+  }
+  el.classList.remove("ble");
+  const age = u.data_age_s;
+  const stale = age != null && age >= 300;
+  el.hidden = !stale;
+  if (stale) {
+    const t = age < 3600 ? Math.round(age / 60) + "m" : (age / 3600).toFixed(1) + "h";
+    el.textContent = "data frozen " + t;
+    el.title = "Nothing in this unit's cloud payload has changed for " + t
+      + " — you are looking at EcoFlow's cached snapshot, not live state.";
+  }
+}
+
+function renderUnit(unit, u) {
+  setFreshChip($("fresh" + unit), u);
+  renderGauge($("gauge" + unit), unit, u);
+  $("cap" + unit).innerHTML = `<b>${fmtWh(u.wh_est)}</b> of ${fmtWh(u.wh_full)}`;
+  // dotted leader keeps each value tied to its own label instead of stranding
+  // the two at opposite edges of the card
+  const flow = (label, w, title) =>
+    `<div class="row"${title ? ` title="${title}"` : ""}><span>${label}</span><i></i><b>${fmtW(w)}</b></div>`;
+  $("state" + unit).innerHTML = `<div class="chip-row">${stateChip(u)}</div>
+    <div class="flows">
+      ${flow("Solar in", u.solar.w)}
+      ${flow("AC in", u.ac.in_w)}
+      ${flow("Output", u.load_w)}
+      ${(u.xfer_w ?? 0) > 5 ? flow("→ Extra pack", u.xfer_w, "Power moving from the main pack into the Extra Battery — it stays in the bank, so it is not consumption") : ""}
+    </div>`;
+  const s = u.solar, ac = u.ac, p0 = u.packs[0];
+  $("grid" + unit).innerHTML =
+    cell("PV Array", s.v ? `${s.v.toFixed(1)} V <small>· ${s.a.toFixed(2)} A</small>` : "<small>no sun</small>") +
+    cell("AC Output", ac.out_enabled ? `${fmtW(ac.out_w)} <small>· on${ac.xboost ? " +xb" : ""}</small>` : "<small>off</small>") +
+    cell("DC / USB", fmtW((u.dc.car_w ?? 0) + (u.dc.usb_w ?? 0))) +
+    cell("Batt Temp", p0 ? `${temp(p0.temp)} <small>· cells ${temp(p0.cell_temp_min)}–${temp(p0.cell_temp_max)}</small>` : "—") +
+    cell("MPPT / Inv", `${temp(s.temp)} <small>/ ${temp(ac.temp)}</small>`) +
+    cell("Fan", u.fan_level ? `level ${u.fan_level}` : "<small>off</small>");
+  $("packs" + unit).innerHTML = u.packs.map(p =>
+    `<div class="pack"><b>${p.name}</b><span>${p.soc?.toFixed(1)}%</span><span>${p.vol?.toFixed(1)} V</span><span>${fmtWh(p.wh_est)}</span></div>`
+  ).join("");
+}
+
+/* The hero state line. The percentage says where the bank is; this says where it
+   is going and how long that takes — the question you actually walk over to ask.
+   Time-to-full/empty is derived from stored energy at the present net rate, not
+   from EcoFlow's own estimate, which balloons to nonsense near zero flow.
+   Solar and load moved to the stage panels; this line owns direction and time. */
+function clockAt(min) {
+  const d = new Date(Date.now() + min * 60000);
+  const t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  // a time that lands past midnight needs its day named, even when under 24 h out
+  return d.toDateString() !== new Date().toDateString()
+    ? `${d.toLocaleDateString([], { weekday: "short" })} ${t}` : t;
+}
+
+function renderBankState(netR, stored, target) {
+  let cls, lead, rate, eta;
+  if (netR > 5) {
+    cls = "chg"; lead = "Charging"; rate = `<b>+${netR.toLocaleString()} W</b>`;
+    const m = Math.round((target - stored) / netR * 60);
+    eta = m > 0 ? `full in <b>${fmtMin(m)}</b> · <b>${clockAt(m)}</b>` : "bank full";
+  } else if (netR < -5) {
+    cls = "dsg"; lead = "Draining"; rate = `<b>−${Math.abs(netR).toLocaleString()} W</b>`;
+    const m = Math.round(stored / Math.abs(netR) * 60);
+    eta = m > 0 ? `empty in <b>${fmtMin(m)}</b> · <b>${clockAt(m)}</b>` : "";
+  } else {
+    cls = "idle"; lead = "Holding"; rate = "no net flow"; eta = "";
+  }
+  $("bankState").innerHTML =
+    `<span class="grp ${cls}"><span class="lead">${lead}</span></span>`
+    + `<span class="grp">${rate}</span>`
+    + (eta ? `<span class="sep"></span><span class="grp">${eta}</span>` : "");
+}
+
+function renderOverview(d) {
+  const A = d.units.A, B = d.units.B;
+  const transfer = transferW(A, B);
+  const solA = A.solar.w ?? 0, solB = B.solar.w ?? 0, solar = solA + solB;
+  const load = houseLoadW(A, B);
+  const stored = A.wh_est + B.wh_est, full = A.wh_full + B.wh_full;
+  const pct = full ? 100 * stored / full : 0;
+  // True bank fill rate. Summing each unit's (real in − real out) cancels the
+  // B→A transfer on its own and charges its conversion loss to the system;
+  // solar+wall−load would count the transfer as free. Safe because wattsInSum,
+  // unlike wattsOutSum, does NOT include the main→Extra shuffle (docs/api.md).
+  const net = ((A.in_w ?? 0) - (A.load_w ?? 0)) + ((B.in_w ?? 0) - (B.load_w ?? 0));
+
+  // A panel reading zero is not news — dim it so a screen with real power on it
+  // looks different from a screen without, at a glance, from across the box.
+  $("oSolar").innerHTML = `${Math.round(solar).toLocaleString()}<small>W</small>`;
+  $("wSolA").textContent = `${Math.round(solA)} W`;
+  $("wSolB").textContent = `${Math.round(solB)} W`;
+  $("wingSun").classList.toggle("is-zero", solar < 1);
+
+  $("oLoad").innerHTML = `${Math.round(load).toLocaleString()}<small>W</small>`;
+  $("wingLoad").classList.toggle("is-zero", load < 1);
+
+  // Per-outlet rows in the POWER OUT wing. A row with nothing to say dims and
+  // says it in words instead of holding a dead zero.
+  const acW = A.ac.out_w ?? 0;
+  const dcW = (A.dc.car_w ?? 0) + (A.dc.usb_w ?? 0) + (B.dc.car_w ?? 0) + (B.dc.usb_w ?? 0);
+  const shoreW = Math.max(0, (A.ac.in_w ?? 0) - transfer) + Math.max(0, (B.ac.in_w ?? 0));
+  const row = (id, on, text) => {
+    $(id).textContent = text;
+    $(id).closest(".wrow").classList.toggle("dim", !on);
+  };
+  row("ldAc", acW > 5, acW > 5 ? fmtW(acW) : (A.ac.out_enabled ? "on · no draw" : "off"));
+  row("ldDc", dcW > 1, dcW > 1 ? fmtW(dcW) : "idle");
+  row("ldSh", shoreW > 5, shoreW > 5 ? `${fmtW(shoreW)} in` : "not connected");
+
+  // Backup: usable stored energy over the 7-day average daily drain — "if
+  // there's no solar tomorrow, how long do I have at my typical usage?" The
+  // denominator comes from /api/history (energy balance, losses included;
+  // spec: docs/superpowers/specs/2026-08-05-backup-metric-design.md), so it
+  // holds still while the instantaneous load swings. Usable stops at each
+  // unit's discharge reserve — the units cut off there, not at zero.
+  const drain = state.hist?.drain;
+  const usable = [A, B].reduce((s, u) =>
+    s + Math.max(0, u.wh_est - (u.limits?.min_dsg_soc ?? 0) / 100 * u.wh_full), 0);
+  if (drain?.wh_per_day) {
+    const days = usable / drain.wh_per_day;
+    row("oRun", true, days >= 10 ? "10+ days"
+      : days >= 1 ? `${days.toFixed(1)} days` : `${(days * 24).toFixed(0)} h`);
+  } else {
+    row("oRun", false, state.hist ? "learning usage" : "—");
+  }
+
+  const netR = Math.round(net);
+
+  // Segmented bank bar. 20 segments, not 12: at 12 the bar rounded to the
+  // nearest 8.3% and visibly disagreed with its own number (54% lit 6/12 = 50%).
+  const SEGS = 20, litLevel = pct < 15 ? "c" : pct < 40 ? "w" : "";
+  const lit = Math.round(SEGS * pct / 100);
+  $("bankCells").innerHTML = Array.from({ length: SEGS },
+    (_, i) => `<i class="${i < lit ? "f " + litLevel : ""}"></i>`).join("");
+  $("bankPct").innerHTML = `${pct.toFixed(0)}<small>%</small>`;
+  // per-unit % lives on the truck's own banks now; the sub keeps the energy truth
+  $("bankSub").innerHTML = `<b>${fmtWh(stored)}</b> of ${fmtWh(full)} stored`;
+  // "full in" counts to the configured charge cap, not to 100% — with a cap set,
+  // 100% never arrives and the countdown would promise a time that never comes
+  const target = A.wh_full * ((A.limits?.max_chg_soc ?? 100) / 100)
+               + B.wh_full * ((B.limits?.max_chg_soc ?? 100) / 100);
+  renderBankState(netR, stored, target);
+
+  // top-bar status pills
+  const sun = solar > 1400 ? ["Strong", "--good"] : solar > 300 ? ["Good", "--good"]
+            : solar > 20 ? ["Weak", "--warn"] : ["None", "--faint"];
+  $("solarStat").textContent = sun[0];
+  $("solarStat").style.color = css(sun[1]);
+  $("solarIco").style.color = css(solar > 20 ? "--a-bright" : "--faint");
+
+  const chg = net > 5 ? ["Charging", "--good"] : net < -5 ? ["Discharging", "--warn"] : ["Idle", "--muted"];
+  $("chgStat").textContent = chg[0];
+  $("chgStat").style.color = css(chg[1]);
+  $("chgIco").style.color = css(chg[1]);
+
+  renderSchematic(A, B, transfer);
+
+  const active = transfer > 5;
+  $("condLine").classList.toggle("on", active);
+  $("condLine").style.setProperty("--fc", css("--b-bright"));
+  $("condArrow").classList.toggle("on", active);
+  $("condArrow").style.setProperty("--fc", css("--b-bright"));
+  $("condW").textContent = active ? fmtW(transfer) : "idle";
+
+  return { pct };
+}
+
+function renderLive(d) {
+  const A = d.units.A, B = d.units.B;
+  if (A.error || B.error) throw new Error(A.error || B.error);
+
+  const { pct } = renderOverview(d);
+  renderUnit("A", A); renderUnit("B", B);
+
+  // system view
+  const lt = (k, v, sub) => `<div class="card stat"><div><div class="k">${k}</div><div class="v">${fmtWh(v)}</div><div class="sub">${sub}</div></div></div>`;
+  $("lifetime").innerHTML =
+    lt("Solar harvested", A.lifetime_wh.solar_in + B.lifetime_wh.solar_in, `A ${fmtWh(A.lifetime_wh.solar_in)} · B ${fmtWh(B.lifetime_wh.solar_in)}`) +
+    lt("Wall power in", A.lifetime_wh.ac_in + B.lifetime_wh.ac_in, "the extension-cord habit") +
+    lt("AC delivered", A.lifetime_wh.ac_out + B.lifetime_wh.ac_out, "lifetime inverter output") +
+    lt("DC delivered", A.lifetime_wh.dc_out + B.lifetime_wh.dc_out, "12 V + USB");
+
+  $("diag").innerHTML = ["A", "B"].map(un => {
+    const u = d.units[un];
+    return `<div class="card"><div class="card-h"><h3>Unit ${un}</h3></div>
+      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin:12px 16px 16px">
+        ${cell("Cycles", u.packs.map(p => p.cycles).join(" / "))}
+        ${cell("Health", u.packs.map(p => p.soh + "%").join(" / "))}
+        ${cell("Cell spread", u.packs.map(p => "Δ" + p.cell_spread_mv + " mV").join(" / "))}
+        ${cell("Pack voltage", u.packs.map(p => p.vol?.toFixed(1) + " V").join(" / "))}
+        ${cell("Charge limits", `${u.limits.min_dsg_soc}–${u.limits.max_chg_soc}%`)}
+        ${cell("AC charge cap", fmtW(u.ac.slow_chg_w))}
+        ${cell("MPPT temp", temp(u.solar.temp))}
+        ${cell("Inverter temp", temp(u.ac.temp))}
+      </div></div>`;
+  }).join("");
+
+  // system health dot in the top bar
+  const bad = pct < 12, warn = pct < 25;
+  $("sysDot").className = "dot pulse" + (bad ? " c" : warn ? " w" : "");
+  return bad ? "Battery critical" : warn ? "Battery low" : "System normal";
+}
+
+/* ---------- history rendering ---------- */
+function statTile(k, v, sub) {
+  return `<div class="card stat"><div><div class="k">${k}</div><div class="v">${v}</div><div class="sub">${sub || ""}</div></div></div>`;
+}
+
+/** The A/C column started logging later than the rest, so say what window this covers. */
+function dutySub(s) {
+  if (s.ac_duty_pct == null) return "no inverter samples yet";
+  const span = s.ac_span_min || 0;
+  const win = span < 90 ? `${span} min` : span < 1440 ? `${(span / 60).toFixed(1)} h` : `${Math.round(span / 1440)} d`;
+  const avg = s.ac_avg_when_on ? `${Math.round(s.ac_avg_when_on)} W running · ` : "";
+  return `${avg}over ${win} logged`;
+}
+
+function renderHistory(h) {
+  const label = { "24h": "last 24 hours", "7d": "last 7 days", "30d": "last 30 days" }[h.range];
+  $("powerNote").textContent = "— " + label;
+
+  // the Overview ribbon fills whatever height the one-screen grid left it
+  // Overview retires the unit identity colors: the ribbon speaks two
+  // brightnesses of the truck blue and names its own lines.
+  drawSoc($("chartSocMini"), state.hist24 || h, {
+    fill: true, height: 190, endLabels: true,
+    colors: { A: "#6CC2F0", B: "#2E7FAE" },
+  });
+  drawPower($("chartPower"), h);
+  drawSoc($("chartSoc"), h);
+  drawDaily($("chartDaily"), h);
+  drawProfile($("chartProfile"), h);
+
+  const sA = h.stats.A, sB = h.stats.B;
+  const cov = h.coverage.first ? new Date(h.coverage.first) : null;
+  const covTxt = cov
+    ? `logging since ${cov.toLocaleDateString([], { month: "short", day: "numeric" })} ${cov.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${h.coverage.samples.toLocaleString()} samples`
+    : "no samples yet";
+  $("covNote").textContent = covTxt;
+  $("covNote2").textContent = covTxt;
+
+  $("powerStats").innerHTML = sA ? [
+    statTile("Peak solar · A", (sA.peak_solar_w ?? 0) + " W",
+      sA.peak_solar_at ? "at " + new Date(sA.peak_solar_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
+    statTile("Peak solar · B", (sB?.peak_solar_w ?? 0) + " W",
+      sB?.peak_solar_at ? "at " + new Date(sB.peak_solar_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
+    statTile("A/C duty cycle", sA.ac_duty_pct == null ? "—" : sA.ac_duty_pct + "%", dutySub(sA)),
+    statTile("SOC swing · A", sA.soc_min == null ? "—" : `${Math.round(sA.soc_min)}–${Math.round(sA.soc_max)}%`, label),
+  ].join("") : "";
+
+  // energy stats from daily rollups. B's AC output feeds A's AC input, so
+  // the matched Wh are a transfer; only unmatched AC-in came from outside.
+  const dA = h.daily.A, dB = h.daily.B;
+  const byDate = {};
+  for (const d of dA) byDate[d.date] = { solar: d.solar_wh, used: d.ac_out_wh + d.dc_out_wh, aIn: d.ac_in_wh, bOut: 0, bIn: 0 };
+  for (const d of dB) {
+    const e = byDate[d.date] || (byDate[d.date] = { solar: 0, used: 0, aIn: 0, bOut: 0, bIn: 0 });
+    e.solar += d.solar_wh; e.used += d.dc_out_wh; e.bOut += d.ac_out_wh; e.bIn += d.ac_in_wh;
+  }
+  for (const e of Object.values(byDate)) {
+    e.xfer = Math.min(e.bOut, e.aIn);
+    e.wall = (e.aIn - e.xfer) + e.bIn;
+  }
+  // today's harvest, for the SOLAR IN wing on Overview ("sv" locale = YYYY-MM-DD)
+  const today = byDate[new Date().toLocaleDateString("sv")];
+  $("wSolToday").textContent = today && today.solar > 0 ? fmtWh(today.solar) : "—";
+  const days = Object.entries(byDate).sort();
+  if (!days.length) {
+    $("energyStats").innerHTML = statTile("Daily energy", "—", "waiting for the first full day of counter data");
+  } else {
+    const n = days.length;
+    const sum = k => days.reduce((a, [, v]) => a + v[k], 0);
+    const best = days.reduce((a, b) => (b[1].solar > a[1].solar ? b : a));
+    $("energyStats").innerHTML = [
+      statTile("Avg harvest / day", fmtWh(sum("solar") / n), `over ${n} day${n > 1 ? "s" : ""} logged`),
+      statTile("Avg used / day", fmtWh(sum("used") / n), "AC + DC loads · transfers excluded"),
+      statTile("Transferred B→A", fmtWh(sum("xfer")), "stays in the system · ~15% conversion toll"),
+      statTile("Best solar day", fmtWh(best[1].solar), dayLabel(best[0])),
+      // grid charging has never happened yet; surface the tile only if it does
+      ...(sum("wall") > 0 ? [statTile("Wall power used", fmtWh(sum("wall")), "grid top-ups in range")] : []),
+    ].join("");
+  }
+
+  $("logStats").innerHTML = [
+    statTile("Samples logged", h.coverage.samples.toLocaleString(), "both units, every 30 s"),
+    statTile("Logging since", cov ? cov.toLocaleDateString([], { month: "short", day: "numeric" }) : "—",
+      cov ? cov.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
+    statTile("Days covered", days.length || "—", "with energy counters"),
+    statTile("Bucket size", (h.bucket_s / 60) + " min", "chart resolution at this range"),
+  ].join("");
+}
+
+/* ---------- control page ---------- */
+const CTL_GROUPS = [["power", "Power"], ["charging", "Charging"],
+                    ["device", "Device"], ["advanced", "Advanced"]];
+let CTL = [];                  // registry from /api/controls
+const ctlBusy = new Set();     // "B:ac_out" rows awaiting readback verify
+let ctlDrag = null;            // slider tag while the thumb is held
+
+function ctlRowHtml(u, c) {
+  const id = `ctl-${u}-${c.key}`;
+  let widget;
+  if (c.kind === "toggle") {
+    widget = `<div class="toggle" id="${id}" role="switch" aria-checked="false" data-u="${u}" data-key="${c.key}"></div>`;
+  } else if (c.kind === "choice") {
+    widget = `<div class="mini-seg ctl-seg" id="${id}" data-u="${u}" data-key="${c.key}">`
+      + c.choices.map(([v, l]) => `<button data-v="${v}">${l}</button>`).join("") + `</div>`;
+  } else {
+    widget = `<div class="ctl-slider">
+      <input type="range" id="${id}" min="${c.min}" max="${c.max}" step="${c.step}" data-u="${u}" data-key="${c.key}">
+      <span class="ctl-val" id="${id}-val">—</span></div>`;
+  }
+  const hint = c.help ? `<div class="hint">${c.help}</div>` : "";
+  return `<div class="ctl-row" id="row-${u}-${c.key}">
+    <div class="lbl">${c.label}${c.risky ? '<span class="risk-tag">confirm</span>' : ""}</div>
+    ${widget}${hint}</div>`;
+}
+
+async function initControls() {
+  try { CTL = await (await fetch("/api/controls")).json(); }
+  catch (e) { console.error("controls registry failed:", e); return; }
+  for (const u of ["B", "A"]) {
+    $("ctl" + u).innerHTML = CTL_GROUPS.map(([g, label]) => {
+      const rows = CTL.filter(c => c.group === g).map(c => ctlRowHtml(u, c)).join("");
+      return rows ? `<details class="ctl-sec"${g === "advanced" ? "" : " open"}>
+        <summary>${label}</summary>${rows}</details>` : "";
+    }).join("");
+  }
+  if (state.live) updateControls(state.live);
+}
+
+function updateControls(d) {
+  if (!CTL.length) return;
+  for (const u of ["A", "B"]) {
+    const unit = d.units[u];
+    // advisory only — the flag flaps/lags, so it never disables anything
+    $("ctlOff" + u).hidden = !(unit.error || unit.online === 0);
+    if (unit.error || !unit.settings) continue;
+    setFreshChip($("ctlFresh" + u), unit);
+    for (const c of CTL) {
+      if (ctlBusy.has(u + ":" + c.key) || ctlDrag === u + ":" + c.key) continue;
+      const el = $(`ctl-${u}-${c.key}`);
+      const raw = unit.settings[c.key];
+      if (!el || raw == null) continue;
+      const v = Math.round(parseFloat(raw));
+      if (c.kind === "toggle") {
+        el.setAttribute("aria-checked", String(v === 1));
+      } else if (c.kind === "choice") {
+        el.querySelectorAll("button").forEach(b => b.setAttribute("aria-selected", String(+b.dataset.v === v)));
+      } else {
+        el.value = v;
+        // 128 is the firmware's "auto brightness" sentinel, not a percent
+        $(el.id + "-val").textContent =
+          c.key === "lcd_brightness" && v === 128 ? "auto" : v + (c.unit || "");
+      }
+    }
+  }
+  renderExtraBattery(d);
+}
+
+function renderExtraBattery(d) {
+  const A = d.units.A;
+  const xb = !A.error && A.packs?.find(p => p.name === "Extra");
+  $("xbCard").style.display = xb ? "" : "none";
+  if (!xb) return;
+  const flow = (xb.in_w ?? 0) > 5 ? `charging <small>· ${fmtW(xb.in_w)}</small>`
+    : (xb.out_w ?? 0) > 5 ? `discharging <small>· ${fmtW(xb.out_w)}</small>` : "<small>idle</small>";
+  $("xbGrid").innerHTML =
+    cell("Charge", `${xb.soc?.toFixed(1)}%`) +
+    cell("Stored", `${fmtWh(xb.wh_est)} <small>of ${fmtWh(xb.wh_full)}</small>`) +
+    cell("Flow", flow) +
+    cell("Cycles", xb.cycles ?? "—") +
+    cell("Health", xb.soh != null ? xb.soh + "%" : "—") +
+    cell("Temp", `${temp(xb.temp)} <small>· cells ${temp(xb.cell_temp_min)}–${temp(xb.cell_temp_max)}</small>`) +
+    cell("Cell spread", `Δ${xb.cell_spread_mv} mV`) +
+    cell("Voltage", `${xb.vol?.toFixed(1)} V`);
+}
+
+/* confirm sheet — resolves true/false */
+let sheetResolve = null;
+function confirmSheet(u, c, value) {
+  return new Promise(res => {
+    sheetResolve = res;
+    const target = c.kind === "toggle" ? (value ? "ON" : "OFF") : value + (c.unit || "");
+    $("sheetTitle").textContent = `${c.label} · Unit ${u}`;
+    $("sheetMsg").innerHTML = ctlContext(u, c, value, target);
+    $("sheetVeil").classList.add("open");
+  });
+}
+function sheetDone(ok) {
+  $("sheetVeil").classList.remove("open");
+  if (sheetResolve) { sheetResolve(ok); sheetResolve = null; }
+}
+$("sheetGo").addEventListener("click", () => sheetDone(true));
+$("sheetNo").addEventListener("click", () => sheetDone(false));
+$("sheetVeil").addEventListener("click", e => { if (e.target === $("sheetVeil")) sheetDone(false); });
+
+function ctlContext(u, c, value, target) {
+  const live = state.live?.units?.[u];
+  const lines = [];
+  if (live && !live.error) {
+    if (c.key === "ac_out") {
+      const w = live.ac?.out_w ?? 0;
+      if (u === "A" && !value && w > 5)
+        lines.push(`The inverter is delivering <b>${fmtW(w)}</b> right now — this cuts the A/C.`);
+      if (u === "B")
+        lines.push(value ? "This starts feeding Unit A's input (B→A transfer)."
+          : w > 5 ? `B is delivering <b>${fmtW(w)}</b> into A — this stops the transfer.`
+                  : "This is the B→A transfer switch.");
+    }
+    if (c.key === "car_out" && !value && (live.dc?.car_w ?? 0) > 5)
+      lines.push(`The 12V port is carrying <b>${fmtW(live.dc.car_w)}</b>.`);
+    if ((c.key === "min_dsg_soc" || c.key === "max_chg_soc") && live.soc != null)
+      lines.push(`Unit ${u} is at <b>${live.soc.toFixed(0)}%</b> now.`);
+  }
+  return `Set <b>${c.label}</b> on <b>Unit ${u}</b> to <b>${target}</b>.`
+    + (lines.length ? "<br><br>" + lines.join("<br>") : "");
+}
+
+let toastTimer;
+function toast(msg, ok) {
+  const t = $("toastBox");
+  t.textContent = msg;
+  t.className = "toast show " + (ok ? "ok" : "fail");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), ok ? 3500 : 7000);
+}
+
+async function ctlSend(u, key, value) {
+  const c = CTL.find(x => x.key === key);
+  const tag = u + ":" + key, row = $(`row-${u}-${key}`);
+  if (!c || ctlBusy.has(tag)) return;
+  if (c.risky && !(await confirmSheet(u, c, value))) {
+    if (state.live) updateControls(state.live);   // roll back the optimistic flip
+    return;
+  }
+  ctlBusy.add(tag);
+  row.classList.remove("ok", "fail");
+  row.classList.add("pending");
+  let res;
+  try {
+    const r = await fetch("/api/control", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unit: u, key, value }),
+    });
+    res = await r.json();
+    if (!r.ok) throw new Error(res.error || "HTTP " + r.status);
+  } catch (e) {
+    res = { applied: false, error: e.message || String(e) };
+  }
+  ctlBusy.delete(tag);
+  row.classList.remove("pending");
+  void row.offsetWidth;   // restart the flash animation cleanly
+  row.classList.add(res.applied ? "ok" : "fail");
+  const via = res.via === "ble" ? " via bluetooth" : "";
+  toast(res.applied ? `${c.label} · Unit ${u} — confirmed by readback${via}`
+    : `${c.label} · Unit ${u} — ${res.error || `did not take${via} (hardware reports ${res.readback})`}`,
+    res.applied);
+  refreshLive();          // cache was invalidated server-side; repaint truth
+}
+
+$("view-control").addEventListener("click", e => {
+  const t = e.target.closest(".toggle[data-key]");
+  if (t) {
+    const v = t.getAttribute("aria-checked") === "true" ? 0 : 1;
+    t.setAttribute("aria-checked", String(v === 1));   // optimistic flip under the spinner
+    ctlSend(t.dataset.u, t.dataset.key, v);
+    return;
+  }
+  const b = e.target.closest(".ctl-seg button");
+  if (b) {
+    const seg = b.closest(".ctl-seg");
+    seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
+    ctlSend(seg.dataset.u, seg.dataset.key, +b.dataset.v);
+  }
+});
+$("view-control").addEventListener("input", e => {
+  const s = e.target.closest("input[type=range]");
+  if (!s) return;
+  ctlDrag = s.dataset.u + ":" + s.dataset.key;
+  const c = CTL.find(x => x.key === s.dataset.key);
+  $(s.id + "-val").textContent = s.value + (c?.unit || "");
+});
+$("view-control").addEventListener("change", e => {
+  const s = e.target.closest("input[type=range]");
+  if (!s) return;
+  ctlDrag = null;
+  ctlSend(s.dataset.u, s.dataset.key, +s.value);   // commit on release only
+});
+
+/* ---------- auto balance ---------- */
+let balHold = false;   // a threshold slider is being dragged — don't repaint it
+
+function renderBalancer(d) {
+  $("balEnable").setAttribute("aria-checked", String(!!d.config.enabled));
+  $("emgEnable").setAttribute("aria-checked", String(!!d.config.emergency_enabled));
+  if (!balHold) {
+    for (const [id, key] of [["balStart", "start_soc"], ["balStop", "stop_soc"],
+                             ["emgATrig", "emergency_a_soc"],
+                             ["emgAClear", "emergency_a_clear_soc"],
+                             ["emgBFloor", "emergency_b_floor"]]) {
+      $(id).value = d.config[key];
+      $(id + "-val").textContent = d.config[key] + "%";
+    }
+  }
+  const s = d.status || {};
+  $("balState").textContent = s.state || "—";
+  $("balState").dataset.state = s.state || "";
+  const bits = [];
+  if (s.b_soc != null) bits.push(`B at ${(+s.b_soc).toFixed(1)}%`);
+  if (s.a_soc != null) bits.push(`A at ${(+s.a_soc).toFixed(1)}%`);
+  if (s.last_action) {
+    const a = s.last_action;
+    bits.push(`last action: AC ${a.action} at ${(+a.b_soc).toFixed(1)}%`
+      + (a.applied ? "" : " — did not take, retrying each check"));
+  }
+  if (s.error) bits.push(`error: ${s.error}`);
+  $("balNote").textContent = bits.join(" · ")
+    || "Checks both units once a minute while the dashboard server is running.";
+}
+
+async function refreshBalancer() {
+  try { renderBalancer(await (await fetch("/api/balancer")).json()); }
+  catch (e) { console.error("balancer refresh failed:", e); }
+}
+
+async function balSend(patch) {
+  try {
+    const r = await fetch("/api/balancer", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const res = await r.json();
+    if (!r.ok) throw new Error(res.error || "HTTP " + r.status);
+    toast("Auto balance — saved", true);
+  } catch (e) {
+    toast("Auto balance — " + (e.message || e), false);
+  }
+  refreshBalancer();   // repaint from server truth either way
+}
+
+for (const [id, key] of [["balEnable", "enabled"],
+                         ["emgEnable", "emergency_enabled"]]) {
+  $(id).addEventListener("click", e => {
+    e.stopPropagation();
+    const v = $(id).getAttribute("aria-checked") !== "true";
+    $(id).setAttribute("aria-checked", String(v));   // optimistic
+    balSend({ [key]: v });
+  });
+}
+for (const [id, key] of [["balStart", "start_soc"], ["balStop", "stop_soc"],
+                         ["emgATrig", "emergency_a_soc"],
+                         ["emgAClear", "emergency_a_clear_soc"],
+                         ["emgBFloor", "emergency_b_floor"]]) {
+  // direct listeners + stopPropagation: the view-control delegated handlers
+  // must not route these into the per-unit /api/control path
+  $(id).addEventListener("input", e => {
+    e.stopPropagation();
+    balHold = true;
+    $(id + "-val").textContent = e.target.value + "%";
+  });
+  $(id).addEventListener("change", e => {
+    e.stopPropagation();
+    balHold = false;
+    balSend({ [key]: +e.target.value });
+  });
+}
+
+/* ---------- data plumbing ---------- */
+async function refreshLive() {
+  let health = null;
+  try {
+    const d = await (await fetch("/api/live")).json();
+    state.live = d;
+    // controls update first: it handles per-unit errors itself, while
+    // renderLive throws on any unit error and would skip it entirely
+    try { updateControls(d); } catch (e) { console.error("controls update failed:", e); }
+    health = renderLive(d);
+    state.lastOk = Date.now();
+  } catch (e) { console.error("live refresh failed:", e); }
+  const stale = Date.now() - state.lastOk > 45000;
+  if (stale) $("sysDot").className = "dot c";
+  $("sysTxt").textContent = state.lastOk === 0 ? "connecting…"
+    : stale ? "signal lost — retrying" : (health || "System normal");
+  tickClock();
+}
+async function refreshHistory() {
+  try {
+    const h = await (await fetch("/api/history?range=" + state.range)).json();
+    if (h.error) throw new Error(h.error);
+    state.hist = h;
+    if (h.range === "24h") state.hist24 = h;
+    renderHistory(h);
+  } catch (e) { console.error("history refresh failed:", e); }
+}
+
+/* ---------- controls ---------- */
+function setView(v) {
+  state.view = v;
+  $("app").dataset.view = v;   // lets CSS vary chrome per view (see .pills)
+  document.querySelectorAll(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
+  document.querySelectorAll(".rail-btn[data-view]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === v)));
+  $("viewTitle").textContent = VIEW_TITLE[v] || "Pod Power";
+  // charts sized from their container need a redraw once the view is visible
+  if (state.hist) renderHistory(state.hist);
+}
+function setRange(r) {
+  state.range = r;
+  document.querySelectorAll("#rangeTabs button, #rangeTabs2 button")
+    .forEach(b => b.setAttribute("aria-selected", String(b.dataset.range === r)));
+  refreshHistory();
+}
+$("rail").addEventListener("click", e => {
+  const b = e.target.closest(".rail-btn[data-view]");
+  if (b) setView(b.dataset.view);
+});
+for (const id of ["rangeTabs", "rangeTabs2"]) {
+  $(id).addEventListener("click", e => {
+    const b = e.target.closest("button"); if (b) setRange(b.dataset.range);
+  });
+}
+$("railToggle").addEventListener("click", () => {
+  state.railOpen = !state.railOpen;
+  $("app").classList.toggle("rail-open", state.railOpen);
+  localStorage.setItem("railOpen", state.railOpen ? "1" : "0");
+});
+$("refreshBtn").addEventListener("click", e => {
+  const b = e.currentTarget;
+  b.classList.remove("spin"); void b.offsetWidth; b.classList.add("spin");
+  refreshLive(); refreshHistory();
+});
+
+/* A wall display should say what time it is and when it last heard from the rig
+   — a frozen console and a calm one look identical without it. */
+function tickClock() {
+  const now = new Date();
+  $("clockT").textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const age = state.lastOk ? Math.round((Date.now() - state.lastOk) / 1000) : null;
+  $("clockS").textContent = age == null ? "no data yet"
+    : age < 60 ? "updated just now"
+    : age < 3600 ? `updated ${Math.round(age / 60)} min ago`
+    : `updated ${(age / 3600).toFixed(1)} h ago`;
+}
+$("setBtn").addEventListener("click", e => { e.stopPropagation(); $("setPanel").classList.toggle("open"); });
+document.addEventListener("click", e => {
+  if (!$("setPanel").contains(e.target) && !$("setBtn").contains(e.target)) $("setPanel").classList.remove("open");
+});
+$("unitSeg").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.tempUnit = b.dataset.u;
+  localStorage.setItem("tempUnit", state.tempUnit);
+  document.querySelectorAll("#unitSeg button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
+  if (state.live) renderLive(state.live);
+});
+async function setWake(on) {
+  state.wake = on;
+  $("wakeTog").setAttribute("aria-checked", String(on));
+  try {
+    if (on && "wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+    else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (err) { console.warn("wake lock unavailable:", err.message); }
+}
+$("wakeTog").addEventListener("click", () => setWake(!state.wake));
+document.addEventListener("visibilitychange", () => {
+  if (state.wake && !wakeLock && document.visibilityState === "visible") setWake(true);
+});
+$("autoTog").addEventListener("click", () => {
+  state.auto = !state.auto;
+  localStorage.setItem("auto", state.auto ? "1" : "0");
+  $("autoTog").setAttribute("aria-checked", String(state.auto));
+});
+
+/* ---------- boot ---------- */
+buildSchematic();
+$("app").classList.toggle("rail-open", state.railOpen);
+document.querySelectorAll("#unitSeg button")
+  .forEach(b => b.setAttribute("aria-selected", String(b.dataset.u === state.tempUnit)));
+$("autoTog").setAttribute("aria-checked", String(state.auto));
+$("foot").innerHTML = "live state cached 10 s · commands verified by readback · history from <code>data/samples.csv</code><br>"
+  + "EcoFlow's API has no historical endpoint — every chart here is built from samples this poller logged.";
+
+// #units, #control, … deep-links a view (also lets the tablet bookmark one).
+// hashchange too, so back/forward and a re-tapped bookmark actually switch view
+// instead of silently leaving whatever was already on screen.
+const viewFromHash = () => VIEW_TITLE[location.hash.slice(1)] ? location.hash.slice(1) : "overview";
+addEventListener("hashchange", () => setView(viewFromHash()));
+setView(viewFromHash());
+tickClock();
+setInterval(tickClock, 20000);
+
+initControls();
+refreshLive();
+refreshHistory();
+refreshBalancer();
+setInterval(() => { if (state.auto) refreshBalancer(); }, 30000);
+setInterval(() => { if (state.auto) refreshLive(); }, 15000);
+setInterval(() => { if (state.auto) refreshHistory(); }, 60000);
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => state.hist && renderHistory(state.hist), 250); });
+// the self-hosted fonts land after first paint and reflow the marquee; charts
+// measured against the pre-font layout must be drawn again at the real size
+document.fonts.ready.then(() => state.hist && renderHistory(state.hist));
+</script>
+</body>
+</html>

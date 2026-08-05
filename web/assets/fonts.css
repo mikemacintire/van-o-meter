@@ -1,0 +1,38 @@
+/* Self-hosted so the console renders with no internet — the truck is off-grid and a CDN
+   link would silently collapse the whole type system to system fallbacks.
+   Latin subset only. Plex Sans ships from Google as a variable font (one file covering
+   every weight); Plex Mono is static per weight. Refresh: scripts/fetch_fonts.mjs
+   (Oxanium retired 2026-08-05 — Plex Sans carries display duty now; the .woff2 is
+   still on disk but nothing references it.) */
+
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: swap;
+  src: url(/assets/fonts/IBMPlexSans-var.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/assets/fonts/IBMPlexMono-400.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/assets/fonts/IBMPlexMono-500.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(/assets/fonts/IBMPlexMono-600.woff2) format('woff2');
+}
