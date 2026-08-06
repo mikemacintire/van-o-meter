@@ -115,7 +115,7 @@ body {
 }
 /* Every quantity is mono + tabular so columns of numbers line up and a changing
    digit doesn't reflow the row it sits in. */
-.num, .v, .big, .ctl-val, .cell .v, .flows b, .pack b, .pack span, .eta b {
+.num, .v, .big, .ctl-val, .flows b, .eta b {
   font-family: var(--mono); font-variant-numeric: tabular-nums;
 }
 
@@ -169,7 +169,7 @@ body {
 
 /* ================= top bar ================= */
 /* min-width:0 on the flex children and a wrap as the backstop: without both, the
-   title + pills + clock + button row simply grew past the viewport and dragged
+   title + clock + button row simply grew past the viewport and dragged
    a horizontal scrollbar onto every view. */
 .topbar {
   position: sticky; top: 0; z-index: 30;
@@ -192,23 +192,6 @@ h1 {
 .dot.c { background: var(--crit); box-shadow: 0 0 9px var(--crit); animation: none; }
 @keyframes pulse { 50% { opacity: .28; } }
 .spacer { flex: 1 1 auto; }
-
-/* Solar / charging status. Hidden on Overview, where the hero state line says
-   the same thing at a size you can read from across the box. */
-.pills { display: flex; align-items: center; gap: 14px; }
-.app[data-view="overview"] .pills, .app[data-view="overview"] .pill-div { display: none; }
-.pill { display: flex; align-items: center; gap: 11px; white-space: nowrap; }
-.pill-ico {
-  width: 38px; height: 38px; border-radius: 999px; flex: none;
-  display: grid; place-items: center; border: 1px solid var(--line2);
-}
-.pill-ico svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.pill-txt .k {
-  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .13em;
-  text-transform: uppercase; color: var(--faint);
-}
-.pill-txt .v { font-size: var(--t-sm); margin-top: 2px; font-weight: 500; }
-.pill-div { width: 1px; height: 34px; background: var(--line2); }
 
 /* Clock + freshness. A wall display should say when it last heard from the rig. */
 .clock { text-align: right; white-space: nowrap; }
@@ -252,8 +235,6 @@ h1 {
   padding: 16px 17px;
 }
 .stat > :only-child { grid-column: 1 / -1; }   /* tiles rendered without an icon */
-.stat-ico { width: 48px; height: 48px; border-radius: 13px; display: grid; place-items: center; flex: none; }
-.stat-ico svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .stat .k {
   font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .14em;
   text-transform: uppercase; color: var(--muted);
@@ -439,11 +420,10 @@ h1 {
 .bank-state .idle { color: var(--faint); }
 
 /* ---------- units ---------- */
-.units { display: grid; grid-template-columns: 1fr 118px 1fr; align-items: stretch; }
-.unit { padding: 19px; position: relative; overflow: hidden; }
-.unit::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
-.unit-a::before { background: linear-gradient(var(--a-bright), transparent 86%); }
-.unit-b::before { background: linear-gradient(var(--b-bright), transparent 86%); }
+/* minmax(0,1fr), not 1fr: the pack table's nowrap min-content would otherwise
+   widen the track past the viewport instead of scrolling inside its card */
+.units { display: grid; grid-template-columns: minmax(0,1fr) 118px minmax(0,1fr); align-items: stretch; }
+.unit { padding: 19px; }
 .unit h2 {
   font-family: var(--disp); font-size: var(--t-md); font-weight: 700; letter-spacing: .13em;
   text-transform: uppercase; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -451,19 +431,26 @@ h1 {
 .unit h2 .role { color: var(--faint); font-weight: 500; font-size: var(--t-micro); letter-spacing: .09em; }
 .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
 .unit-a .swatch { background: var(--a); } .unit-b .swatch { background: var(--b); }
-.unit-top { display: flex; gap: 20px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
 
-/* The gauge is the ring + the big percentage only. The capacity line used to sit
-   inside the SVG at y=91, where a 20-char string ran straight through the arc at
-   both ends — it lives under the ring now, in HTML, where it can be sized. */
-.gauge-wrap { flex: none; width: 168px; text-align: center; }
-.gauge { width: 168px; display: block; }
-.g-soc { font-size: 38px; font-weight: 600; fill: var(--ink); font-family: var(--mono); }
-.g-pct { font-size: 15px; fill: var(--muted); }
-.gauge-cap { font-size: var(--t-sm); color: var(--muted); margin-top: -4px; }
-.gauge-cap b { font-family: var(--mono); color: var(--ink); font-weight: 500; }
-
-.state { display: flex; flex-direction: column; gap: 12px; min-width: 210px; flex: 1; }
+/* Hero left (SOC + mini bank bar, the marquee's own vocabulary at arm's-length
+   size), live rows right. The ring gauge is retired: one charge-bar language
+   across the whole console. */
+.unit-top { display: grid; grid-template-columns: minmax(230px, 2fr) minmax(0, 3fr); gap: 18px 40px; align-items: start; margin-top: 18px; }
+.unit-hero { display: grid; gap: 12px; align-content: start; }
+.usoc {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: var(--t-2xl); font-weight: 600; line-height: 1; letter-spacing: -.02em;
+}
+.usoc small { font-size: .5em; color: var(--muted); font-weight: 400; }
+.ubar { display: flex; gap: 4px; align-items: center; max-width: 340px; }
+.cellwrap.sm { gap: 2px; border-width: 1.5px; border-radius: 8px; padding: 3px; }
+.cellwrap.sm i { min-height: 13px; border-radius: 2px; }
+.cellwrap.sm i.f { box-shadow: 0 0 7px rgba(62,216,138,.3); }
+.cellwrap.sm i.f.w { box-shadow: 0 0 7px rgba(227,179,65,.3); }
+.cellwrap.sm i.f.c { box-shadow: 0 0 7px rgba(240,85,90,.3); }
+.cellcap.sm { height: 14px; width: 6px; }
+.ucap { color: var(--muted); font-size: var(--t-sm); }
+.ucap b { font-family: var(--mono); color: var(--ink); font-weight: 500; }
 .chip {
   display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
   border: 1px solid var(--line2); border-radius: 999px; padding: 6px 14px;
@@ -476,37 +463,41 @@ h1 {
 .chip-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .eta { color: var(--muted); font-size: var(--t-sm); }
 .eta b { color: var(--ink); font-weight: 500; }
-/* label and value stay adjacent — a dotted leader beats a 400px void */
-.flows { display: grid; gap: 7px; font-size: var(--t-sm); max-width: 340px; }
+/* label and value stay adjacent — a dotted leader beats a 400px void.
+   Same row grammar as the Overview panels: label left, mono value right,
+   a row with nothing to say dims and says it in words. */
+.flows { display: grid; gap: 8px; font-size: var(--t-sm); max-width: 420px; align-content: start; }
 .flows .row { display: grid; grid-template-columns: auto minmax(12px,1fr) auto; align-items: baseline; gap: 8px; }
 .flows .row span { color: var(--muted); }
 .flows .row::after { display: none; }
 .flows .row i { border-bottom: 1px dotted var(--line2); transform: translateY(-.25em); }
 .flows .row b { font-weight: 500; }
+.flows .row b small { color: var(--muted); font-weight: 400; }
+.flows .row.rule { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.flows .row.dim span { color: var(--faint); }
+.flows .row.dim b { color: var(--faint); font-family: var(--sans); font-weight: 400; }
 
-/* Six cells, so the column count has to divide 6 — auto-fit picked 5 and left an
-   orphan. A container query reads the CARD's width, which is what actually
-   varies: at 1024 the two-up unit cards are ~400px and a viewport breakpoint
-   can't tell that from a 400px card on a phone. */
-.unit { container-type: inline-size; }
-.grid {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
-  background: var(--line); border: 1px solid var(--line); border-radius: var(--r-sm);
-  overflow: hidden; margin-top: 18px;
+/* Per-pack table: charge, flow and health for every pack in the bank — the one
+   home for what used to be scattered across three views (packs row, System
+   diagnostics, the Control page's extra-battery card). */
+.ptable-wrap { margin-top: 18px; border: 1px solid var(--line); border-radius: var(--r-sm); overflow-x: auto; }
+.ptable { width: 100%; border-collapse: collapse; }
+.ptable th {
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--faint); text-align: right;
+  padding: 10px 12px; border-bottom: 1px solid var(--line2); white-space: nowrap;
 }
-@container (min-width: 560px) {
-  .grid { grid-template-columns: repeat(3, 1fr); }
+.ptable td {
+  font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: var(--t-sm);
+  text-align: right; padding: 11px 12px; white-space: nowrap;
 }
-.cell { background: var(--surface2); padding: 12px 14px; }
-.cell .k { color: var(--faint); font-size: var(--t-micro); letter-spacing: .1em; text-transform: uppercase; font-family: var(--disp); font-weight: 600; }
-.cell .v { margin-top: 5px; font-size: var(--t-md); }
-.cell .v small { color: var(--muted); font-size: .8em; }
-.packs { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
-.pack {
-  border: 1px solid var(--line2); border-radius: 8px; padding: 9px 13px;
-  font-size: var(--t-sm); color: var(--muted); display: flex; gap: 12px; align-items: baseline;
+.ptable tr + tr td { border-top: 1px solid var(--line); }
+.ptable th:first-child, .ptable td:first-child { text-align: left; }
+.ptable td:first-child {
+  font-family: var(--disp); font-weight: 600; font-size: var(--t-micro);
+  letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
 }
-.pack b { color: var(--ink); font-weight: 600; font-family: var(--disp); letter-spacing: .06em; text-transform: uppercase; font-size: var(--t-micro); }
+.ptable td.dim { color: var(--faint); font-family: var(--sans); }
 
 .conduit { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; }
 .conduit .lbl {
@@ -554,7 +545,6 @@ h1 {
 .rangebar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
 .cov { color: var(--faint); font-size: var(--t-sm); }
 .stack { display: grid; gap: 14px; }
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .stat-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
 footer {
   margin-top: 30px; color: var(--faint); font-size: var(--t-sm); text-align: center;
@@ -824,30 +814,27 @@ footer code { color: var(--muted); font-family: var(--mono); }
   .sch-val { display: none; }
 }
 /* Below this the four-across tiles get too tight; two rows of two reads better. */
-/* Two control cards side by side leave ~330px each — not enough for a label,
-   a hint and a segmented control. One column below this. */
+/* Two cards side by side leave too little for a two-column card interior —
+   control rows (label + hint + segmented control) and unit cards (hero +
+   rows) both need the room. One column below this. */
 @media (max-width: 1250px) {
   .ctl-units { grid-template-columns: 1fr; }
+  .units { grid-template-columns: 1fr; }
+  .conduit { flex-direction: row; padding: 16px 0; gap: 14px; }
+  .conduit svg { transform: rotate(90deg); width: 46px; }
 }
 @media (max-width: 900px) {
   #view-overview.active { grid-template-rows: auto auto auto; }
   .marquee { grid-template-columns: 1fr; gap: 16px; }
-  .units { grid-template-columns: 1fr; }
-  .conduit { flex-direction: row; padding: 16px 0; gap: 14px; }
-  .conduit svg { transform: rotate(90deg); width: 46px; }
-  .two-col { grid-template-columns: 1fr; }
   .stat-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
 }
-/* Topbar sheds its secondary readouts before it wraps. Order of sacrifice:
-   pills (duplicated in the views), then the freshness line, then the clock. */
-@media (max-width: 1150px) {
-  .topbar .pills, .topbar .pill-div { display: none; }
-}
+/* Topbar sheds its secondary readouts before it wraps: the freshness line,
+   then the clock. */
 @media (max-width: 620px) {
   .clock .s { display: none; }
 }
 @media (max-width: 460px) {
-  .topbar .clock, .topbar .pill-div { display: none; }
+  .topbar .clock { display: none; }
 }
 
 @media (max-width: 780px) {
@@ -859,8 +846,8 @@ footer code { color: var(--muted); font-family: var(--mono); }
   .stat { grid-template-columns: minmax(0,1fr); gap: 12px; }
   .stat .v { font-size: var(--t-lg); }
   h1 { font-size: var(--t-md); }
-  .pill-txt .k { display: none; }
   .clock .s { display: none; }
+  .unit-top { grid-template-columns: minmax(0,1fr); }
   .settings { left: calc(var(--rail) + 8px); right: 8px; min-width: 0; }
   /* the control column can't hold 224px next to a label at this width */
   .ctl-row, #balCard .ctl-row { grid-template-columns: minmax(0,1fr); row-gap: 12px; }
@@ -928,14 +915,8 @@ review, the verdict, and DESIGN.md.
   <button class="rail-btn" role="tab" data-view="control" aria-selected="false" aria-controls="view-control">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7M17 7h3M4 17h3M13 17h7M4 12h13"/><circle cx="14" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/><circle cx="20" cy="12" r="2.4"/></svg><span>Control</span>
   </button>
-  <button class="rail-btn" role="tab" data-view="power" aria-selected="false" aria-controls="view-power">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19h-20"/></svg><span>Power</span>
-  </button>
-  <button class="rail-btn" role="tab" data-view="energy" aria-selected="false" aria-controls="view-energy">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L5 14h6l-1 8 8-12h-6l1-8z"/></svg><span>Energy</span>
-  </button>
-  <button class="rail-btn" role="tab" data-view="system" aria-selected="false" aria-controls="view-system">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span>System</span>
+  <button class="rail-btn" role="tab" data-view="history" aria-selected="false" aria-controls="view-history">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19h-20"/></svg><span>History</span>
   </button>
   </div>
   <div class="rail-grow"></div>
@@ -965,22 +946,6 @@ review, the verdict, and DESIGN.md.
   <h1 id="viewTitle">Power Overview</h1>
   <div class="sys-state"><span class="dot pulse" id="sysDot"></span><span id="sysTxt">connecting…</span></div>
   <div class="spacer"></div>
-  <div class="pills">
-    <div class="pill">
-      <div class="pill-ico" id="solarIco" style="color:var(--faint)">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></svg>
-      </div>
-      <div class="pill-txt"><div class="k">Solar status</div><div class="v" id="solarStat">—</div></div>
-    </div>
-    <div class="pill-div"></div>
-    <div class="pill">
-      <div class="pill-ico" id="chgIco" style="color:var(--faint)">
-        <svg viewBox="0 0 24 24"><path d="M13 2L5 14h6l-1 8 8-12h-6l1-8z"/></svg>
-      </div>
-      <div class="pill-txt"><div class="k">Charging status</div><div class="v" id="chgStat">—</div></div>
-    </div>
-  </div>
-  <div class="pill-div"></div>
   <div class="clock"><div class="t" id="clockT">—</div><div class="s" id="clockS">—</div></div>
   <button class="icon-btn" id="refreshBtn" aria-label="Refresh now">
     <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 4v7h-7"/></svg>
@@ -1051,14 +1016,17 @@ review, the verdict, and DESIGN.md.
     <div class="card unit unit-b">
       <h2><span class="swatch"></span>Unit B <span class="role">donor · standalone</span><span class="fresh-chip" id="freshB" hidden></span></h2>
       <div class="unit-top">
-        <div class="gauge-wrap">
-          <svg class="gauge" viewBox="0 0 150 118" id="gaugeB" role="img" aria-label="Unit B state of charge"></svg>
-          <div class="gauge-cap" id="capB"></div>
+        <div class="unit-hero">
+          <div class="usoc" id="usocB">—</div>
+          <div class="ubar" role="img" aria-label="Unit B state of charge">
+            <div class="cellwrap sm" id="ubarB"></div><div class="cellcap sm"></div>
+          </div>
+          <div class="ucap" id="capB"></div>
+          <div class="chip-row" id="chipB"></div>
         </div>
-        <div class="state" id="stateB"></div>
+        <div class="flows" id="rowsB"></div>
       </div>
-      <div class="grid" id="gridB"></div>
-      <div class="packs" id="packsB"></div>
+      <div class="ptable-wrap"><table class="ptable" id="packsB"></table></div>
     </div>
     <div class="conduit">
       <div class="lbl">B → A<br>transfer</div>
@@ -1071,14 +1039,17 @@ review, the verdict, and DESIGN.md.
     <div class="card unit unit-a">
       <h2><span class="swatch"></span>Unit A <span class="role">house · runs the a/c</span><span class="fresh-chip" id="freshA" hidden></span></h2>
       <div class="unit-top">
-        <div class="gauge-wrap">
-          <svg class="gauge" viewBox="0 0 150 118" id="gaugeA" role="img" aria-label="Unit A state of charge"></svg>
-          <div class="gauge-cap" id="capA"></div>
+        <div class="unit-hero">
+          <div class="usoc" id="usocA">—</div>
+          <div class="ubar" role="img" aria-label="Unit A state of charge">
+            <div class="cellwrap sm" id="ubarA"></div><div class="cellcap sm"></div>
+          </div>
+          <div class="ucap" id="capA"></div>
+          <div class="chip-row" id="chipA"></div>
         </div>
-        <div class="state" id="stateA"></div>
+        <div class="flows" id="rowsA"></div>
       </div>
-      <div class="grid" id="gridA"></div>
-      <div class="packs" id="packsA"></div>
+      <div class="ptable-wrap"><table class="ptable" id="packsA"></table></div>
     </div>
   </div>
 </section>
@@ -1146,16 +1117,10 @@ review, the verdict, and DESIGN.md.
       <div id="ctlA"></div>
     </div>
   </div>
-  <div class="card" id="xbCard" style="margin-top:12px;display:none">
-    <div class="card-h"><h3>Extra battery <span class="note">— attached to unit A · telemetry only</span></h3></div>
-    <div class="grid" style="grid-template-columns:repeat(4,1fr);margin:13px 16px 12px" id="xbGrid"></div>
-    <div class="ctl-note">The EcoFlow API exposes no independent settings for expansion packs —
-      charge ceiling and discharge floor on Unit A govern the whole bank, Extra Battery included.</div>
-  </div>
 </section>
 
-<!-- ============ POWER ============ -->
-<section class="view" id="view-power">
+<!-- ============ HISTORY ============ -->
+<section class="view" id="view-history">
   <div class="rangebar">
     <div class="seg" id="rangeTabs" role="tablist">
       <button role="tab" data-range="24h" aria-selected="true">24 Hours</button>
@@ -1171,7 +1136,7 @@ review, the verdict, and DESIGN.md.
           <span><i style="background:var(--a)"></i>Solar A</span>
           <span><i style="background:var(--b)"></i>Solar B</span>
           <span><i class="ln" style="background:var(--load)"></i>House load</span>
-          <span><i class="ln" style="background:var(--accent)"></i>B→A transfer</span>
+          <span><i class="ln" style="background:var(--xfer)"></i>B→A transfer</span>
         </div>
       </div>
       <div class="chart-wrap" id="chartPower"></div>
@@ -1183,28 +1148,13 @@ review, the verdict, and DESIGN.md.
       <div class="chart-wrap" id="chartSoc"></div>
     </div>
     <div class="stat-row" id="powerStats"></div>
-  </div>
-</section>
-
-<!-- ============ ENERGY ============ -->
-<section class="view" id="view-energy">
-  <div class="rangebar">
-    <div class="seg" id="rangeTabs2" role="tablist">
-      <button role="tab" data-range="24h" aria-selected="true">24 Hours</button>
-      <button role="tab" data-range="7d" aria-selected="false">7 Days</button>
-      <button role="tab" data-range="30d" aria-selected="false">30 Days</button>
-    </div>
-    <div class="cov" id="covNote2"></div>
-  </div>
-  <div class="stack">
-    <div class="stat-row" id="energyStats"></div>
     <div class="card">
       <div class="card-h"><h3>Daily energy <span class="note">— harvested vs used</span></h3>
         <div class="legend">
           <span><i style="background:var(--a)"></i>Solar A</span>
           <span><i style="background:var(--b)"></i>Solar B</span>
           <span><i style="background:var(--load)"></i>Used (AC+DC)</span>
-          <span><i style="background:var(--accent)"></i>Transfer B→A</span>
+          <span><i style="background:var(--xfer)"></i>Transfer B→A</span>
         </div>
       </div>
       <div class="chart-wrap" id="chartDaily"></div>
@@ -1215,17 +1165,10 @@ review, the verdict, and DESIGN.md.
       </div>
       <div class="chart-wrap" id="chartProfile"></div>
     </div>
+    <div class="stat-row" id="energyStats"></div>
   </div>
-</section>
-
-<!-- ============ SYSTEM ============ -->
-<section class="view" id="view-system">
-  <div class="sub-head" style="margin-top:0">Lifetime counters</div>
+  <div class="sub-head">Lifetime · since first power-on</div>
   <div class="stat-row" id="lifetime"></div>
-  <div class="sub-head">Diagnostics</div>
-  <div class="two-col" id="diag"></div>
-  <div class="sub-head">Logging</div>
-  <div class="stat-row" id="logStats"></div>
   <footer id="foot"></footer>
 </section>
 </main>
@@ -1247,12 +1190,16 @@ review, the verdict, and DESIGN.md.
 "use strict";
 const $ = id => document.getElementById(id);
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const C = { A: css("--a"), B: css("--b"), load: css("--load"), xfer: css("--accent"), ink: css("--ink") };
+// xfer speaks --xfer, not --accent: the transfer is a data series and the
+// accent is chrome (DESIGN.md split them so they never collide).
+const C = { A: css("--a"), B: css("--b"), load: css("--load"), xfer: css("--xfer"), ink: css("--ink") };
 
 const VIEW_TITLE = {
-  overview: "Power Overview", units: "Unit Detail", control: "Manual Control",
-  power: "Power History", energy: "Energy Ledger", system: "System & Diagnostics",
+  overview: "Power Overview", units: "Unit Detail",
+  control: "Manual Control", history: "History",
 };
+// old bookmarks and deep links from the 6-view console still land somewhere sane
+const HASH_ALIAS = { power: "history", energy: "history", system: "history" };
 
 const state = {
   view: "overview", range: "24h", live: null, hist: null, hist24: null,
@@ -1620,32 +1567,7 @@ function drawProfile(wrap, hist) {
   });
 }
 
-/* ---------- gauges ---------- */
-function polar(cx, cy, r, deg) {
-  const a = (deg - 90) * Math.PI / 180;
-  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-}
-function arcPath(cx, cy, r, a0, a1) {
-  const [x0, y0] = polar(cx, cy, r, a0), [x1, y1] = polar(cx, cy, r, a1);
-  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
-}
 const socColor = soc => soc < 10 ? css("--crit") : soc < 25 ? css("--warn") : css("--good");
-
-/* The ring carries the percentage and nothing else. The capacity line used to be
-   a <text> at y=91 inside this SVG: ~126px of monospace centred on x=75, where
-   the r=62 arc crosses x≈14 and x≈136 — so it ran straight through the stroke at
-   both ends on both units. It lives in .gauge-cap under the ring now. */
-function renderGauge(svg, unit, u) {
-  const soc = u.soc ?? 0;
-  const color = soc < 10 ? css("--crit") : soc < 25 ? css("--warn") : C[unit];
-  const A0 = -122, A1 = 122;
-  const fill = A0 + (A1 - A0) * Math.min(Math.max(soc, 0), 100) / 100;
-  svg.innerHTML = `
-    <path d="${arcPath(75, 75, 62, A0, A1)}" fill="none" stroke="var(--surface3)" stroke-width="10" stroke-linecap="round"/>
-    ${soc > 0.4 ? `<path d="${arcPath(75, 75, 62, A0, fill)}" fill="none" stroke="${color}" stroke-width="10"
-      stroke-linecap="round" style="filter:drop-shadow(0 0 6px ${color}55)"/>` : ""}
-    <text class="g-soc" x="75" y="88" text-anchor="middle">${u.soc == null ? "—" : u.soc.toFixed(1)}<tspan class="g-pct">%</tspan></text>`;
-}
 
 /* =================================================================
    RIG SINGLE-LINE SCHEMATIC
@@ -1807,7 +1729,6 @@ function stateChip(u) {
   }
   return `<span class="chip idle"><span class="d"></span>Idle</span>`;
 }
-const cell = (k, v) => `<div class="cell"><div class="k">${k}</div><div class="v">${v}</div></div>`;
 
 /* "data frozen 12m" chip — shown once the cloud payload hasn't changed for
    5 min. Under 5 min of no movement is normal (idle unit, calm night). */
@@ -1833,30 +1754,55 @@ function setFreshChip(el, u) {
 
 function renderUnit(unit, u) {
   setFreshChip($("fresh" + unit), u);
-  renderGauge($("gauge" + unit), unit, u);
-  $("cap" + unit).innerHTML = `<b>${fmtWh(u.wh_est)}</b> of ${fmtWh(u.wh_full)}`;
-  // dotted leader keeps each value tied to its own label instead of stranding
-  // the two at opposite edges of the card
-  const flow = (label, w, title) =>
-    `<div class="row"${title ? ` title="${title}"` : ""}><span>${label}</span><i></i><b>${fmtW(w)}</b></div>`;
-  $("state" + unit).innerHTML = `<div class="chip-row">${stateChip(u)}</div>
-    <div class="flows">
-      ${flow("Solar in", u.solar.w)}
-      ${flow("AC in", u.ac.in_w)}
-      ${flow("Output", u.load_w)}
-      ${(u.xfer_w ?? 0) > 5 ? flow("→ Extra pack", u.xfer_w, "Power moving from the main pack into the Extra Battery — it stays in the bank, so it is not consumption") : ""}
-    </div>`;
-  const s = u.solar, ac = u.ac, p0 = u.packs[0];
-  $("grid" + unit).innerHTML =
-    cell("PV Array", s.v ? `${s.v.toFixed(1)} V <small>· ${s.a.toFixed(2)} A</small>` : "<small>no sun</small>") +
-    cell("AC Output", ac.out_enabled ? `${fmtW(ac.out_w)} <small>· on${ac.xboost ? " +xb" : ""}</small>` : "<small>off</small>") +
-    cell("DC / USB", fmtW((u.dc.car_w ?? 0) + (u.dc.usb_w ?? 0))) +
-    cell("Batt Temp", p0 ? `${temp(p0.temp)} <small>· cells ${temp(p0.cell_temp_min)}–${temp(p0.cell_temp_max)}</small>` : "—") +
-    cell("MPPT / Inv", `${temp(s.temp)} <small>/ ${temp(ac.temp)}</small>`) +
-    cell("Fan", u.fan_level ? `level ${u.fan_level}` : "<small>off</small>");
-  $("packs" + unit).innerHTML = u.packs.map(p =>
-    `<div class="pack"><b>${p.name}</b><span>${p.soc?.toFixed(1)}%</span><span>${p.vol?.toFixed(1)} V</span><span>${fmtWh(p.wh_est)}</span></div>`
-  ).join("");
+  const soc = u.soc;
+
+  // hero — the marquee's segmented-bar language at arm's-length size
+  $("usoc" + unit).innerHTML = soc == null ? "—" : `${soc.toFixed(1)}<small>%</small>`;
+  const SEGS = 20, lvl = soc < 15 ? "c" : soc < 40 ? "w" : "";
+  const lit = Math.round(SEGS * Math.min(Math.max(soc ?? 0, 0), 100) / 100);
+  $("ubar" + unit).innerHTML = Array.from({ length: SEGS },
+    (_, i) => `<i class="${i < lit ? "f " + lvl : ""}"></i>`).join("");
+  $("cap" + unit).innerHTML = `<b>${fmtWh(u.wh_est)}</b> of ${fmtWh(u.wh_full)} stored`;
+  $("chip" + unit).innerHTML = stateChip(u);
+
+  // live rows — the Overview panels' grammar: label left, mono value right,
+  // a row with nothing to say dims and says it in words
+  const row = (label, on, val, title) =>
+    `<div class="row${on ? "" : " dim"}"${title ? ` title="${title}"` : ""}><span>${label}</span><i></i><b>${val}</b></div>`;
+  const s = u.solar, ac = u.ac;
+  const dcW = (u.dc.car_w ?? 0) + (u.dc.usb_w ?? 0);
+  const acOn = (ac.out_w ?? 0) > 5;
+  $("rows" + unit).innerHTML =
+    row("Solar in", (s.w ?? 0) > 3, (s.w ?? 0) > 3 ? fmtW(s.w) : "no sun") +
+    row("AC in", (ac.in_w ?? 0) > 5, (ac.in_w ?? 0) > 5 ? fmtW(ac.in_w) : "none") +
+    row("AC out", acOn, acOn ? fmtW(ac.out_w) + (ac.xboost ? " <small>+xboost</small>" : "")
+      : ac.out_enabled ? "on · no draw" : "off") +
+    row("12 V + USB", dcW > 1, dcW > 1 ? fmtW(dcW) : "idle") +
+    ((u.xfer_w ?? 0) > 5 ? row("→ Extra pack", true, fmtW(u.xfer_w),
+      "Power moving from the main pack into the Extra Battery — it stays in the bank, so it is not consumption") : "") +
+    `<div class="row rule${(s.w ?? 0) > 3 ? "" : " dim"}"><span>PV array</span><i></i><b>${
+      s.v ? `${s.v.toFixed(1)} V <small>· ${s.a.toFixed(2)} A</small>` : "no sun"}</b></div>` +
+    row("MPPT / inverter", true, `${temp(s.temp)} <small>·</small> ${temp(ac.temp)}`) +
+    row("Fan", !!u.fan_level, u.fan_level ? "level " + u.fan_level : "off");
+
+  // pack table — charge, flow and health for every pack in the bank; the one
+  // home for what three views used to repeat
+  const flowCell = p => (p.in_w ?? 0) > 5 ? `in ${fmtW(p.in_w)}`
+    : (p.out_w ?? 0) > 5 ? `out ${fmtW(p.out_w)}` : null;
+  $("packs" + unit).innerHTML =
+    `<tr><th>Pack</th><th>Charge</th><th>Stored</th><th>Flow</th><th>Volts</th><th>Cycles</th><th>Health</th><th>Cell Δ</th><th>Temp</th></tr>`
+    + u.packs.map(p => {
+      const fl = flowCell(p);
+      return `<tr><td>${p.name}</td>`
+        + `<td>${p.soc == null ? "—" : p.soc.toFixed(1) + "%"}</td>`
+        + `<td>${fmtWh(p.wh_est)}</td>`
+        + `<td${fl ? "" : ' class="dim"'}>${fl || "idle"}</td>`
+        + `<td>${p.vol == null ? "—" : p.vol.toFixed(1) + " V"}</td>`
+        + `<td>${p.cycles ?? "—"}</td>`
+        + `<td>${p.soh != null ? p.soh + "%" : "—"}</td>`
+        + `<td>${p.cell_spread_mv != null ? p.cell_spread_mv + " mV" : "—"}</td>`
+        + `<td title="cells ${temp(p.cell_temp_min)}–${temp(p.cell_temp_max)}">${temp(p.temp)}</td></tr>`;
+    }).join("");
 }
 
 /* The hero state line. The percentage says where the bank is; this says where it
@@ -1961,18 +1907,6 @@ function renderOverview(d) {
                + B.wh_full * ((B.limits?.max_chg_soc ?? 100) / 100);
   renderBankState(netR, stored, target);
 
-  // top-bar status pills
-  const sun = solar > 1400 ? ["Strong", "--good"] : solar > 300 ? ["Good", "--good"]
-            : solar > 20 ? ["Weak", "--warn"] : ["None", "--faint"];
-  $("solarStat").textContent = sun[0];
-  $("solarStat").style.color = css(sun[1]);
-  $("solarIco").style.color = css(solar > 20 ? "--a-bright" : "--faint");
-
-  const chg = net > 5 ? ["Charging", "--good"] : net < -5 ? ["Discharging", "--warn"] : ["Idle", "--muted"];
-  $("chgStat").textContent = chg[0];
-  $("chgStat").style.color = css(chg[1]);
-  $("chgIco").style.color = css(chg[1]);
-
   renderSchematic(A, B, transfer);
 
   const active = transfer > 5;
@@ -1992,28 +1926,14 @@ function renderLive(d) {
   const { pct } = renderOverview(d);
   renderUnit("A", A); renderUnit("B", B);
 
-  // system view
+  // lifetime counters (History view) — range-independent, straight off the
+  // units' own cumulative Wh registers
   const lt = (k, v, sub) => `<div class="card stat"><div><div class="k">${k}</div><div class="v">${fmtWh(v)}</div><div class="sub">${sub}</div></div></div>`;
   $("lifetime").innerHTML =
     lt("Solar harvested", A.lifetime_wh.solar_in + B.lifetime_wh.solar_in, `A ${fmtWh(A.lifetime_wh.solar_in)} · B ${fmtWh(B.lifetime_wh.solar_in)}`) +
     lt("Wall power in", A.lifetime_wh.ac_in + B.lifetime_wh.ac_in, "the extension-cord habit") +
     lt("AC delivered", A.lifetime_wh.ac_out + B.lifetime_wh.ac_out, "lifetime inverter output") +
     lt("DC delivered", A.lifetime_wh.dc_out + B.lifetime_wh.dc_out, "12 V + USB");
-
-  $("diag").innerHTML = ["A", "B"].map(un => {
-    const u = d.units[un];
-    return `<div class="card"><div class="card-h"><h3>Unit ${un}</h3></div>
-      <div class="grid" style="grid-template-columns:repeat(2,1fr);margin:12px 16px 16px">
-        ${cell("Cycles", u.packs.map(p => p.cycles).join(" / "))}
-        ${cell("Health", u.packs.map(p => p.soh + "%").join(" / "))}
-        ${cell("Cell spread", u.packs.map(p => "Δ" + p.cell_spread_mv + " mV").join(" / "))}
-        ${cell("Pack voltage", u.packs.map(p => p.vol?.toFixed(1) + " V").join(" / "))}
-        ${cell("Charge limits", `${u.limits.min_dsg_soc}–${u.limits.max_chg_soc}%`)}
-        ${cell("AC charge cap", fmtW(u.ac.slow_chg_w))}
-        ${cell("MPPT temp", temp(u.solar.temp))}
-        ${cell("Inverter temp", temp(u.ac.temp))}
-      </div></div>`;
-  }).join("");
 
   // system health dot in the top bar
   const bad = pct < 12, warn = pct < 25;
@@ -2053,11 +1973,10 @@ function renderHistory(h) {
 
   const sA = h.stats.A, sB = h.stats.B;
   const cov = h.coverage.first ? new Date(h.coverage.first) : null;
-  const covTxt = cov
-    ? `logging since ${cov.toLocaleDateString([], { month: "short", day: "numeric" })} ${cov.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${h.coverage.samples.toLocaleString()} samples`
+  // one line owns all the provenance: since-when, how much, at what resolution
+  $("covNote").textContent = cov
+    ? `logging since ${cov.toLocaleDateString([], { month: "short", day: "numeric" })} ${cov.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${h.coverage.samples.toLocaleString()} samples · ${h.bucket_s / 60}-min buckets`
     : "no samples yet";
-  $("covNote").textContent = covTxt;
-  $("covNote2").textContent = covTxt;
 
   $("powerStats").innerHTML = sA ? [
     statTile("Peak solar · A", (sA.peak_solar_w ?? 0) + " W",
@@ -2065,7 +1984,8 @@ function renderHistory(h) {
     statTile("Peak solar · B", (sB?.peak_solar_w ?? 0) + " W",
       sB?.peak_solar_at ? "at " + new Date(sB.peak_solar_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
     statTile("A/C duty cycle", sA.ac_duty_pct == null ? "—" : sA.ac_duty_pct + "%", dutySub(sA)),
-    statTile("SOC swing · A", sA.soc_min == null ? "—" : `${Math.round(sA.soc_min)}–${Math.round(sA.soc_max)}%`, label),
+    statTile("SOC swing", sA.soc_min == null ? "—" : `${Math.round(sA.soc_min)}–${Math.round(sA.soc_max)}%`,
+      sB?.soc_min == null ? "Unit A" : `Unit A · B ${Math.round(sB.soc_min)}–${Math.round(sB.soc_max)}%`),
   ].join("") : "";
 
   // energy stats from daily rollups. B's AC output feeds A's AC input, so
@@ -2100,14 +2020,6 @@ function renderHistory(h) {
       ...(sum("wall") > 0 ? [statTile("Wall power used", fmtWh(sum("wall")), "grid top-ups in range")] : []),
     ].join("");
   }
-
-  $("logStats").innerHTML = [
-    statTile("Samples logged", h.coverage.samples.toLocaleString(), "both units, every 30 s"),
-    statTile("Logging since", cov ? cov.toLocaleDateString([], { month: "short", day: "numeric" }) : "—",
-      cov ? cov.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""),
-    statTile("Days covered", days.length || "—", "with energy counters"),
-    statTile("Bucket size", (h.bucket_s / 60) + " min", "chart resolution at this range"),
-  ].join("");
 }
 
 /* ---------- control page ---------- */
@@ -2175,25 +2087,6 @@ function updateControls(d) {
       }
     }
   }
-  renderExtraBattery(d);
-}
-
-function renderExtraBattery(d) {
-  const A = d.units.A;
-  const xb = !A.error && A.packs?.find(p => p.name === "Extra");
-  $("xbCard").style.display = xb ? "" : "none";
-  if (!xb) return;
-  const flow = (xb.in_w ?? 0) > 5 ? `charging <small>· ${fmtW(xb.in_w)}</small>`
-    : (xb.out_w ?? 0) > 5 ? `discharging <small>· ${fmtW(xb.out_w)}</small>` : "<small>idle</small>";
-  $("xbGrid").innerHTML =
-    cell("Charge", `${xb.soc?.toFixed(1)}%`) +
-    cell("Stored", `${fmtWh(xb.wh_est)} <small>of ${fmtWh(xb.wh_full)}</small>`) +
-    cell("Flow", flow) +
-    cell("Cycles", xb.cycles ?? "—") +
-    cell("Health", xb.soh != null ? xb.soh + "%" : "—") +
-    cell("Temp", `${temp(xb.temp)} <small>· cells ${temp(xb.cell_temp_min)}–${temp(xb.cell_temp_max)}</small>`) +
-    cell("Cell spread", `Δ${xb.cell_spread_mv} mV`) +
-    cell("Voltage", `${xb.vol?.toFixed(1)} V`);
 }
 
 /* confirm sheet — resolves true/false */
@@ -2417,7 +2310,7 @@ async function refreshHistory() {
 /* ---------- controls ---------- */
 function setView(v) {
   state.view = v;
-  $("app").dataset.view = v;   // lets CSS vary chrome per view (see .pills)
+  $("app").dataset.view = v;   // lets CSS vary per view (Overview's one-screen lock)
   document.querySelectorAll(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
   document.querySelectorAll(".rail-btn[data-view]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === v)));
   $("viewTitle").textContent = VIEW_TITLE[v] || "Pod Power";
@@ -2426,7 +2319,7 @@ function setView(v) {
 }
 function setRange(r) {
   state.range = r;
-  document.querySelectorAll("#rangeTabs button, #rangeTabs2 button")
+  document.querySelectorAll("#rangeTabs button")
     .forEach(b => b.setAttribute("aria-selected", String(b.dataset.range === r)));
   refreshHistory();
 }
@@ -2434,11 +2327,9 @@ $("rail").addEventListener("click", e => {
   const b = e.target.closest(".rail-btn[data-view]");
   if (b) setView(b.dataset.view);
 });
-for (const id of ["rangeTabs", "rangeTabs2"]) {
-  $(id).addEventListener("click", e => {
-    const b = e.target.closest("button"); if (b) setRange(b.dataset.range);
-  });
-}
+$("rangeTabs").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (b) setRange(b.dataset.range);
+});
 $("railToggle").addEventListener("click", () => {
   state.railOpen = !state.railOpen;
   $("app").classList.toggle("rail-open", state.railOpen);
@@ -2502,7 +2393,10 @@ $("foot").innerHTML = "live state cached 10 s · commands verified by readback �
 // #units, #control, … deep-links a view (also lets the tablet bookmark one).
 // hashchange too, so back/forward and a re-tapped bookmark actually switch view
 // instead of silently leaving whatever was already on screen.
-const viewFromHash = () => VIEW_TITLE[location.hash.slice(1)] ? location.hash.slice(1) : "overview";
+const viewFromHash = () => {
+  const h = location.hash.slice(1), v = HASH_ALIAS[h] || h;
+  return VIEW_TITLE[v] ? v : "overview";
+};
 addEventListener("hashchange", () => setView(viewFromHash()));
 setView(viewFromHash());
 tickClock();

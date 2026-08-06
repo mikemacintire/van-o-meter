@@ -123,20 +123,32 @@ becomes a static ring.
 
 ## Components
 
-One vocabulary across the five near views. Overview is its own composition
-(2026-08-04 "balance-wings", revised 2026-08-05 "power-path"): three bands —
-marquee, stage reading INPUT → truck → OUTPUT, ribbon — with no icon tiles and
-no mono-set words. See `.impeccable/surfaces/web-index-html.md`.
+One vocabulary across the three near views (Units / Control / History — the
+2026-08-05 consolidation folded Power, Energy and System into History and
+Units). Overview is its own composition (2026-08-04 "balance-wings", revised
+2026-08-05 "power-path"): three bands — marquee, stage reading INPUT → truck →
+OUTPUT, ribbon — with no icon tiles and no mono-set words. See
+`.impeccable/surfaces/web-index-html.md`.
 
-- **Tile** — the stat block (icon tile, label, value, optional meter, sub).
+- **Tile** — the stat block (micro label, mono value, sub — no icon square).
   Near views only; Overview uses panels instead.
 - **Panel** (Overview only) — hairline-framed column flanking the truck, titled
   INPUT or OUTPUT: micro title, iconed hero label, mono hero value, then rows
   with label left / value right. Both panels read left-aligned. Shore lives on
   INPUT (it charges the rig). Dims (`--muted`) when carrying nothing.
-- **Card** — `--surface`, 1px `--line`, `--r`, `--e1`. Cards never nest. On
-  Overview the only card-like objects are the two stage panels and the unit
-  frames drawn on the truck itself.
+- **Value row** — label left, dotted leader, mono value right; a row with
+  nothing to say dims and says it in words ("off", "no sun") set in `--sans`.
+  The near-view echo of the Overview panel rows.
+- **Bank bar** — the marquee's segmented charge bar, reused at arm's-length
+  size (`.cellwrap.sm`) as each unit card's hero. Ring gauges are retired:
+  one charge language console-wide.
+- **Pack table** — per-pack charge / flow / health on the Units view; the one
+  home for pack telemetry (the old packs row, System diagnostics and the
+  extra-battery card all collapsed into it).
+- **Card** — `--surface`, 1px `--line`, `--r`, `--e1`. Cards never nest, and
+  never wear a colored edge-stripe — unit identity is the 11px swatch in the
+  title. On Overview the only card-like objects are the two stage panels and
+  the unit frames drawn on the truck itself.
 - **Row** — a control row: label + hint on the left (max 46ch), control on the right in a
   fixed 220px column. Never label-far-left / control-far-right across a full-width card.
 - **Chip** — status pill, `--disp`, uppercase, 12px.
