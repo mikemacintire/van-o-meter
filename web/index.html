@@ -317,13 +317,16 @@ h1 {
 .panel.is-zero .panel-v { color: var(--muted); }
 .prows { display: flex; flex-direction: column; gap: clamp(4px, .9vh, 10px); margin-top: clamp(2px, .6vh, 8px); }
 .wrow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: var(--f-sub); color: var(--muted); white-space: nowrap; }
-.wrow .rlbl { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+/* The label yields first. A tall viewport makes the truck wide, which squeezes
+   these panels; without this the label and value overrun each other instead of
+   one of them giving way, and overlapping text is worse than a clipped word. */
+.wrow .rlbl { display: inline-flex; align-items: center; gap: 9px; min-width: 0; flex: 0 1 auto; overflow: hidden; }
 .wrow .rlbl svg {
   width: 17px; height: 17px; flex: none; align-self: center;
   stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
   color: var(--faint);
 }
-.wrow b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; color: var(--ink); }
+.wrow b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; color: var(--ink); flex: none; }
 .wrow.dim b { color: var(--faint); font-family: var(--sans); }
 .wrow.rule { margin-top: clamp(6px, 1.2vh, 14px); padding-top: clamp(6px, 1.2vh, 14px); border-top: 1px solid var(--line); }
 
@@ -545,6 +548,17 @@ h1 {
 .rangebar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
 .cov { color: var(--faint); font-size: var(--t-sm); }
 .stack { display: grid; gap: 14px; }
+/* Solar forecast strip: one tile per day ahead. The meter is each day's share
+   of the sunniest day in view, so the week's shape reads before any number. */
+.fc-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 10px; }
+.fc-day { padding: 12px 8px; border: 1px solid var(--line); border-radius: 10px; text-align: center; }
+.fc-day.next { border-color: var(--accent); }   /* tomorrow is the one that matters */
+.fc-day .d { font-size: var(--t-sm); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+.fc-day .v { font-size: var(--t-md); font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.fc-day .s { font-size: var(--t-sm); color: var(--faint); margin-top: 3px; }
+.fc-meter { height: 4px; border-radius: 2px; background: var(--line); margin-top: 9px; }
+.fc-meter i { display: block; height: 100%; background: var(--a); border-radius: 2px; }
+.fc-foot { color: var(--faint); font-size: var(--t-sm); margin-top: 14px; line-height: 1.5; }
 .stat-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
 footer {
   margin-top: 30px; color: var(--faint); font-size: var(--t-sm); text-align: center;
@@ -984,6 +998,9 @@ review, the verdict, and DESIGN.md.
         <div class="wrow"><span class="rlbl">Array A</span><b id="wSolA">—</b></div>
         <div class="wrow"><span class="rlbl">Array B</span><b id="wSolB">—</b></div>
         <div class="wrow rule"><span class="rlbl">Today</span><b id="wSolToday">—</b></div>
+        <!-- forecast harvest: groups with Today (no rule) because both are
+             daily energy, and mirrors Backup at the foot of the OUTPUT panel -->
+        <div class="wrow dim"><span class="rlbl">Tomorrow</span><b id="wSolTmw">—</b></div>
         <div class="wrow rule"><span class="rlbl"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 3.5V8M14.5 3.5V8"/><path d="M7.5 8h9v3.5a4.5 4.5 0 0 1-9 0z"/><path d="M12 16v4.5"/></svg>Shore</span><b id="ldSh">—</b></div>
       </div>
     </div>
@@ -1177,6 +1194,13 @@ review, the verdict, and DESIGN.md.
       </div>
       <div class="chart-wrap" id="chartDaily"></div>
     </div>
+    <!-- the only forward-looking card: what the weather says is coming, scaled
+         by what this rig has actually harvested under past weather -->
+    <div class="card">
+      <div class="card-h"><h3>Solar forecast <span class="note" id="fcNote"></span></h3></div>
+      <div class="fc-strip" id="fcStrip"></div>
+      <div class="fc-foot" id="fcFoot"></div>
+    </div>
     <div class="card">
       <div class="card-h"><h3>Typical day <span class="note">— average by hour</span></h3>
         <div class="legend"><span><i style="background:var(--a)"></i>Solar</span><span><i class="ln" style="background:var(--load)"></i>Load</span></div>
@@ -1220,7 +1244,7 @@ const VIEW_TITLE = {
 const HASH_ALIAS = { power: "history", energy: "history", system: "history" };
 
 const state = {
-  view: "overview", range: "24h", live: null, hist: null, hist24: null,
+  view: "overview", range: "24h", live: null, hist: null, hist24: null, fc: null,
   tempUnit: localStorage.getItem("tempUnit") || "F",
   auto: localStorage.getItem("auto") !== "0",
   railOpen: localStorage.getItem("railOpen") === "1",
@@ -2322,6 +2346,67 @@ async function refreshLive() {
     : stale ? "signal lost — retrying" : (health || "System normal");
   tickClock();
 }
+/* ---------- solar forecast ---------- */
+// Two audiences from one payload: the Overview wants a single number readable
+// from across the truck, the History card shows its work — which weather
+// feature is winning, how wrong it usually is, and what it learned from.
+const FC_FEATURE = {
+  sunshine_duration: "hours of direct sun",
+  cloud_cover_mean: "cloud cover",
+  shortwave_radiation_sum: "solar irradiance",
+};
+
+function renderForecast(f) {
+  // --- far view: one row in the INPUT panel ---
+  const tmw = $("wSolTmw");
+  const ok = f && f.state === "ok" && f.tomorrow?.wh != null && !f.weather_stale;
+  tmw.textContent = ok ? fmtWh(f.tomorrow.wh)
+    : !f || f.state === "unavailable" ? "—"
+    : f.weather_stale ? "weather stale" : "learning";
+  tmw.closest(".wrow").classList.toggle("dim", !ok);
+
+  // --- near view: the card ---
+  const strip = $("fcStrip"), foot = $("fcFoot"), note = $("fcNote");
+  if (!f || f.state === "unavailable") {
+    note.textContent = "";
+    strip.innerHTML = "";
+    foot.textContent = f ? `No weather data — ${f.error || "offline"}.` : "";
+    return;
+  }
+  note.textContent = "— " + f.location.label;
+
+  const days = f.days || [];
+  const peak = Math.max(1, ...days.map(d => d.wh || 0));
+  strip.innerHTML = days.map((d, i) => `
+    <div class="fc-day${i === 0 ? " next" : ""}">
+      <div class="d">${i === 0 ? "Tomorrow"
+        : new Date(d.date + "T12:00:00").toLocaleDateString([], { weekday: "short" })}</div>
+      <div class="v">${d.wh == null ? "—" : fmtWh(d.wh)}</div>
+      <div class="fc-meter"><i style="width:${d.wh == null ? 0 : Math.round(100 * d.wh / peak)}%"></i></div>
+      <div class="s">${d.sunshine_h == null ? "" : d.sunshine_h.toFixed(1) + " h sun"}</div>
+    </div>`).join("");
+
+  const stale = f.weather_stale
+    ? ` Weather data is ${Math.round(f.weather_age_s / 3600)} h old — the uplink may be down.` : "";
+  const m = f.model, wh = n => Math.round(n).toLocaleString();
+  foot.textContent = !m
+    ? `Learning — ${f.training_days} of ${f.min_days} clean days needed. Partial days and `
+      + `days when a pack filled up are excluded, because a full pack throttles the panels.${stale}`
+    : m.kind === "regression"
+      ? `Fitted to ${m.days} clean days against ${FC_FEATURE[m.feature] || m.feature} — `
+        + `typically within ±${wh(m.mae)} Wh, where a flat average would be ±${wh(m.baseline_mae)} Wh.${stale}`
+      : `No weather signal has beaten a plain ${f.window_days}-day average yet, so that average `
+        + `is the prediction — typically within ±${wh(m.mae)} Wh, from ${m.days} clean days.${stale}`;
+}
+
+async function refreshForecast() {
+  try {
+    const f = await (await fetch("/api/forecast")).json();
+    state.fc = f;
+    renderForecast(f);
+  } catch (e) { console.error("forecast refresh failed:", e); }
+}
+
 async function refreshHistory() {
   try {
     const h = await (await fetch("/api/history?range=" + state.range)).json();
@@ -2431,9 +2516,13 @@ initControls();
 refreshLive();
 refreshHistory();
 refreshBalancer();
+refreshForecast();
 setInterval(() => { if (state.auto) refreshBalancer(); }, 30000);
 setInterval(() => { if (state.auto) refreshLive(); }, 15000);
 setInterval(() => { if (state.auto) refreshHistory(); }, 60000);
+// the weather moves in hours, and the server caches for 30 min — polling it
+// at the history cadence would only burn the truck's uplink for nothing
+setInterval(() => { if (state.auto) refreshForecast(); }, 900000);
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => state.hist && renderHistory(state.hist), 250); });
 // the self-hosted fonts land after first paint and reflow the marquee; charts
 // measured against the pre-font layout must be drawn again at the real size

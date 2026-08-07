@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
 from ecoflow.client import EcoFlowClient, EcoFlowApiError
-from ecoflow import balancer, controls, history, single_instance
+from ecoflow import balancer, controls, forecast, history, single_instance, weather
 
 ROOT = Path(__file__).parent
 CSV_PATH = ROOT / "data" / "samples.csv"
@@ -30,6 +30,13 @@ VERIFY_POLL = 1.5    # seconds between readback polls
 BAL_TICK_S = 60      # seconds between auto-balancer checks
 BAL_CFG_PATH = Path(__file__).parent / "data" / "balancer.json"
 BAL_LOG_PATH = Path(__file__).parent / "logs" / "balancer.jsonl"
+FC_CFG_PATH = Path(__file__).parent / "data" / "forecast.json"
+WEATHER_PATH = Path(__file__).parent / "data" / "weather.json"
+FORECAST_TTL = 1800        # seconds to hold a built forecast payload
+WEATHER_TTL = 3 * 3600     # seconds before Open-Meteo is asked again
+WEATHER_STALE_S = 24 * 3600  # older than this and the UI stops trusting it
+FORECAST_AHEAD = 7         # days ahead to request
+PAST_DAYS_MAX = 92         # Open-Meteo's ceiling on past_days
 INSTANCE_LOCK_PORT = 8643   # held by the reloader parent; see __main__
 PACK_WH = 3600       # EcoFlow's rating for one pack (Delta Pro or Extra Battery)
 # Full capacity per unit for the 7-day drain estimate: A carries the Extra
@@ -89,6 +96,10 @@ _ctl_lock = threading.Lock()
 # 30 s-timeout calls), and CSV aggregation must not queue behind that —
 # Flask serves threaded, so these really do run concurrently.
 _hist_lock = threading.Lock()
+# Forecast gets its own too, for the same reason: building it can block on an
+# Open-Meteo fetch, and nothing else should have to wait behind that.
+_fc_cache = {"ts": 0.0, "payload": None}
+_fc_lock = threading.Lock()
 
 
 def _num(q, key, scale=1):
@@ -276,6 +287,46 @@ def api_history():
             "drain": history.avg_daily_drain(rows, DRAIN_WH_FULL),
         }
         _hist_cache[key] = {"ts": now, "payload": payload}
+    return jsonify(payload)
+
+
+@app.get("/api/forecast")
+def api_forecast():
+    """Predicted solar harvest for the days ahead.
+
+    Deliberately not folded into /api/history: the weather changes over hours
+    where the CSV changes over seconds, and an Open-Meteo outage must not be
+    able to take the history views down with it. Fetching is lazy behind a TTL
+    rather than a background thread — the dashboard already runs one of those
+    for the balancer, and duplicate instances each running their own copy has
+    caused a real incident before now.
+    """
+    now = time.time()
+    with _fc_lock:
+        cached = _fc_cache["payload"]
+        if cached and now - _fc_cache["ts"] < FORECAST_TTL:
+            return jsonify(cached)
+
+        cfg = forecast.Config.load(FC_CFG_PATH)
+        try:
+            days, fetched_at = weather.refresh(
+                WEATHER_PATH, cfg.latitude, cfg.longitude,
+                past_days=min(PAST_DAYS_MAX, cfg.window_days + 2),
+                forecast_days=FORECAST_AHEAD, max_age_s=WEATHER_TTL)
+        except weather.WeatherError as e:
+            # Off-grid with nothing cached. A 200 saying so is easier for the
+            # frontend to render honestly than an error status.
+            return jsonify({"state": "unavailable", "error": str(e),
+                            "location": {"label": cfg.label}})
+
+        history.reload_if_header_changed(CSV_PATH)
+        rows = history.load_rows(CSV_PATH)
+        payload = forecast.build(rows, tuple(UNITS), days, cfg,
+                                 now=datetime.now().astimezone())
+        age = now - fetched_at
+        payload["weather_age_s"] = round(age)
+        payload["weather_stale"] = age > WEATHER_STALE_S
+        _fc_cache.update(ts=now, payload=payload)
     return jsonify(payload)
 
 
