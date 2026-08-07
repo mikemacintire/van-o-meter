@@ -412,16 +412,26 @@ def balancer_tick():
             raise RuntimeError("no inv.cfgAcEnabled in quota — not actuating")
         ac_on = int(float(ac_raw)) == 1
         a_soc = None
-        if cfg.emergency_enabled:
-            try:
-                a_raw = (client.get_quota_all(UNITS["A"]) or {}).get(
-                    "ems.f32LcdShowSoc")
-                a_soc = None if a_raw is None else float(a_raw)
-            except Exception as e:
-                status["a_error"] = str(e)   # emergency layer goes inert
+        try:
+            # Read unconditionally: the A-full cutoff has no toggle, so A's
+            # SOC is needed on every tick, not just when emergency is armed.
+            a_raw = (client.get_quota_all(UNITS["A"]) or {}).get(
+                "ems.f32LcdShowSoc")
+            a_soc = None if a_raw is None else float(a_raw)
+        except Exception as e:
+            status["a_error"] = str(e)   # both A-side layers go inert
+        # A full outranks everything: pushing into a full battery curtails A's
+        # own solar and burns B through a double inversion to no benefit.
+        a_full = balancer.a_full_action(a_soc, ac_on, cfg)
         emg = (balancer.emergency_action(a_soc, soc, ac_on, cfg)
                if cfg.emergency_enabled else None)
-        if emg in ("on", "off"):
+        if a_full == "off":
+            action = "off"
+            reason = (f"A full: {a_soc}% >= {cfg.a_full_soc}% — "
+                      f"transfer resumes below {cfg.a_full_resume_soc}%")
+        elif a_full == "block":
+            action = None
+        elif emg in ("on", "off"):
             action = emg
             reason = (
                 f"EMERGENCY: A at {a_soc}% <= {cfg.emergency_a_soc}% — "
@@ -465,8 +475,12 @@ def balancer_tick():
         status["ac_on"] = ac_on
         emergency_active = (cfg.emergency_enabled and ac_on and a_soc is not None
                             and a_soc < cfg.emergency_a_clear_soc)
+        # Re-derived from the post-action state so a just-cut transfer reads
+        # "a-full" rather than a bare "waiting" the Control view can't explain.
+        status["a_full"] = balancer.a_full_action(a_soc, ac_on, cfg) == "block"
         status["state"] = ("emergency" if emergency_active
-                           else "transferring" if ac_on else "waiting")
+                           else "transferring" if ac_on
+                           else "a-full" if status["a_full"] else "waiting")
     except Exception as e:
         status["state"] = "error"
         status["error"] = str(e)
@@ -502,7 +516,10 @@ def api_balancer_set():
             emergency_a_clear_soc=int(
                 body.get("emergency_a_clear_soc", cur.emergency_a_clear_soc)),
             emergency_b_floor=int(
-                body.get("emergency_b_floor", cur.emergency_b_floor)))
+                body.get("emergency_b_floor", cur.emergency_b_floor)),
+            a_full_soc=int(body.get("a_full_soc", cur.a_full_soc)),
+            a_full_resume_soc=int(
+                body.get("a_full_resume_soc", cur.a_full_resume_soc)))
         cfg.validate()
     except (TypeError, ValueError) as e:
         return jsonify({"error": str(e)}), 400

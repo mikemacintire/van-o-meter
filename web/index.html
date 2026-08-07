@@ -716,6 +716,7 @@ footer code { color: var(--muted); font-family: var(--mono); }
 .bal-state[data-state="transferring"] { color: var(--good); border-color: rgba(62,216,138,.45); }
 .bal-state[data-state="waiting"] { color: var(--accent); border-color: rgba(79,179,232,.5); }
 .bal-state[data-state="emergency"] { color: var(--warn); border-color: rgba(227,179,65,.5); }
+.bal-state[data-state="a-full"] { color: var(--good); border-color: rgba(62,216,138,.45); }
 .bal-state[data-state="error"] { color: var(--crit); border-color: rgba(240,85,90,.45); }
 .bal-state[data-state="disabled"] { color: var(--faint); }
 
@@ -1079,6 +1080,23 @@ review, the verdict, and DESIGN.md.
       <div class="ctl-slider">
         <input type="range" id="balStop" min="20" max="95" step="1">
         <span class="ctl-val" id="balStop-val">—</span></div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Cut when A reaches</div>
+      <div class="ctl-slider">
+        <input type="range" id="aFull" min="80" max="100" step="1">
+        <span class="ctl-val" id="aFull-val">—</span></div>
+      <div class="hint">A full battery can't absorb the transfer — B's power bypasses to the loads
+        at a double-inversion loss while A's own solar gets curtailed. Always in force, even with
+        auto balance off: it only ever stops a transfer, never starts one.</div>
+    </div>
+    <div class="ctl-row">
+      <div class="lbl">Resume when A drops below</div>
+      <div class="ctl-slider">
+        <input type="range" id="aFullResume" min="50" max="99" step="1">
+        <span class="ctl-val" id="aFullResume-val">—</span></div>
+      <div class="hint">Keeps the relay from cycling. Without a gap here, A's loads pull it back
+        under the cut level within minutes and the transfer restarts immediately.</div>
     </div>
     <div class="ctl-row">
       <div class="lbl">Emergency fallback</div>
@@ -2209,6 +2227,8 @@ function renderBalancer(d) {
   $("emgEnable").setAttribute("aria-checked", String(!!d.config.emergency_enabled));
   if (!balHold) {
     for (const [id, key] of [["balStart", "start_soc"], ["balStop", "stop_soc"],
+                             ["aFull", "a_full_soc"],
+                             ["aFullResume", "a_full_resume_soc"],
                              ["emgATrig", "emergency_a_soc"],
                              ["emgAClear", "emergency_a_clear_soc"],
                              ["emgBFloor", "emergency_b_floor"]]) {
@@ -2222,6 +2242,9 @@ function renderBalancer(d) {
   const bits = [];
   if (s.b_soc != null) bits.push(`B at ${(+s.b_soc).toFixed(1)}%`);
   if (s.a_soc != null) bits.push(`A at ${(+s.a_soc).toFixed(1)}%`);
+  // Without this the card reads "waiting" with B full and no reason given.
+  if (s.a_full) bits.push(`A is full — no transfer until A drops below `
+    + `${d.config.a_full_resume_soc}%`);
   if (s.last_action) {
     const a = s.last_action;
     bits.push(`last action: AC ${a.action} at ${(+a.b_soc).toFixed(1)}%`
@@ -2262,6 +2285,8 @@ for (const [id, key] of [["balEnable", "enabled"],
   });
 }
 for (const [id, key] of [["balStart", "start_soc"], ["balStop", "stop_soc"],
+                         ["aFull", "a_full_soc"],
+                         ["aFullResume", "a_full_resume_soc"],
                          ["emgATrig", "emergency_a_soc"],
                          ["emgAClear", "emergency_a_clear_soc"],
                          ["emgBFloor", "emergency_b_floor"]]) {

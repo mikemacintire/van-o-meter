@@ -22,8 +22,19 @@ def bal(monkeypatch, tmp_path):
     dashboard._live_cache["payload"] = None
     dashboard._bal["status"] = {}
 
-    def install(quota, cfg=None, apply=True):
+    def install(quota, cfg=None, apply=True, a_soc=50):
+        # FakeClient serves one quota dict for every SN, but the emergency and
+        # A-full layers read A: give A its own SOC, defaulting to a mid level
+        # where neither layer engages. B keeps the dict that commands apply to.
         fake = FakeClient(quota, apply)
+        real = fake.get_quota_all
+
+        def per_sn(sn):
+            q = real(sn)
+            if sn == dashboard.UNITS["A"]:
+                q["ems.f32LcdShowSoc"] = a_soc
+            return q
+        monkeypatch.setattr(fake, "get_quota_all", per_sn)
         monkeypatch.setattr(dashboard, "client", fake)
         dashboard._bal["cfg"] = cfg or Config(enabled=True)
         return fake, dashboard.app.test_client()
@@ -123,6 +134,82 @@ def test_tick_without_action_logs_nothing(bal, monkeypatch, tmp_path):
     assert not log_path.exists()
 
 
+# ---- A-full cutoff (2026-08-06-a-full-cutoff-design.md) ----
+
+def test_tick_cuts_transfer_when_a_is_full(bal):
+    # B at 80% would normally keep transferring down to stop_soc
+    fake, _ = bal(quota(80, True), a_soc=99)
+    dashboard.balancer_tick()
+    assert fake.sets[0]["params"]["enabled"] == 0
+    last = dashboard._bal["status"]["last_action"]
+    assert last["action"] == "off"
+    assert "full" in last["reason"].lower()
+    assert last["a_soc"] == 99
+
+
+def test_tick_blocks_start_while_a_is_full(bal):
+    # B full enough to start, but A has no room — must not chatter it on
+    fake, _ = bal(quota(99.5, False), a_soc=95)
+    dashboard.balancer_tick()
+    assert fake.sets == []
+    assert dashboard._bal["status"]["state"] == "a-full"
+
+
+def test_tick_starts_once_a_falls_below_resume(bal):
+    fake, _ = bal(quota(99.5, False), a_soc=89)
+    dashboard.balancer_tick()
+    assert fake.sets[0]["params"]["enabled"] == 1
+
+
+def test_tick_leaves_transfer_alone_mid_band(bal):
+    # 95 blocks a start but must not cut a transfer already under way
+    fake, _ = bal(quota(80, True), a_soc=95)
+    dashboard.balancer_tick()
+    assert fake.sets == []
+    assert dashboard._bal["status"]["state"] == "transferring"
+
+
+def test_a_full_outranks_emergency_hold(bal):
+    # pathological config: rescue band overlapping the full mark. Cutting
+    # power into a full battery is never the harmful call.
+    cfg = Config(enabled=True, emergency_a_soc=98, emergency_a_clear_soc=100)
+    fake, _ = bal(quota(80, True), cfg=cfg, a_soc=99)
+    dashboard.balancer_tick()
+    assert fake.sets[0]["params"]["enabled"] == 0
+
+
+def test_a_full_cuts_even_with_normal_balancer_off(bal):
+    # emergency-only mode: before this rule a fired rescue ran B down to its
+    # floor no matter how full A got, because nothing ever said stop
+    cfg = Config(enabled=False, emergency_enabled=True)
+    fake, _ = bal(quota(80, True), cfg=cfg, a_soc=100)
+    dashboard.balancer_tick()
+    assert fake.sets[0]["params"]["enabled"] == 0
+
+
+def test_a_read_failure_leaves_transfer_alone(bal, monkeypatch):
+    # cloud flap must not cut a healthy transfer (docs/api.md)
+    fake, _ = bal(quota(80, True))
+    real = fake.get_quota_all
+
+    def flaky(sn):
+        if sn == dashboard.UNITS["A"]:
+            raise RuntimeError("A unreachable")
+        return real(sn)
+    monkeypatch.setattr(fake, "get_quota_all", flaky)
+    dashboard.balancer_tick()
+    assert fake.sets == []
+    assert "A unreachable" in dashboard._bal["status"]["a_error"]
+
+
+def test_a_soc_read_even_when_emergency_disabled(bal):
+    # the A-full layer has no toggle, so A's SOC is no longer optional
+    cfg = Config(enabled=True, emergency_enabled=False)
+    fake, _ = bal(quota(80, True), cfg=cfg, a_soc=99)
+    dashboard.balancer_tick()
+    assert fake.sets[0]["params"]["enabled"] == 0
+
+
 def test_actuation_uses_fresh_companion_state(bal, monkeypatch):
     """The cmd-66 companion (xboost) must come from a quota fetched at
     actuation time under the control lock — not the decision-time read —
@@ -150,7 +237,8 @@ def test_get_balancer_returns_config_and_status(bal):
     assert body["config"] == {"enabled": True, "start_soc": 99, "stop_soc": 60,
                               "emergency_enabled": True, "emergency_a_soc": 15,
                               "emergency_a_clear_soc": 30,
-                              "emergency_b_floor": 15}
+                              "emergency_b_floor": 15, "a_full_soc": 99,
+                              "a_full_resume_soc": 90}
     assert body["status"]["state"] == "transferring"
 
 
