@@ -76,7 +76,36 @@ Mike's read is that charge arriving at A lands in the **Extra Battery**, and the
 
 Snapshot 2026-07-27 09:56: `bmsMaster.inputWatts` 0 while `bmsSlave1.inputWatts` 47 — the packs report independently, and their SOCs drift apart (Main 34.27% vs Extra 29.45%, system `ems.f32LcdShowSoc` 31.83% ≈ their mean). This is a known source of confusion when reading A's state.
 
-**Unresolved:** which instantaneous field reliably indicates an active transfer. Settling it needs samples taken *during* a transfer, which the poller cannot currently provide — it logs no `bmsSlave1.*` and no `inv.acInVol`/`inv.acInAmp`. Until then, difference `pd.chgPowerAc` / `pd.dsgPowerAc` over an interval rather than reading an instantaneous watt field.
+**Unresolved:** which instantaneous field reliably indicates an active transfer. Settling it needs samples taken *during* a transfer. Since 2026-08-15 the poller logs per-pack SOC and voltage (`pack_main_soc`/`pack_extra_soc`/`pack_main_mv`/`pack_extra_mv`) but still no per-pack `inputWatts`/`outputWatts` and no `inv.acInVol`/`inv.acInAmp`. Until then, difference `pd.chgPowerAc` / `pd.dsgPowerAc` over an interval rather than reading an instantaneous watt field.
+
+## Per-pack SOC gauges drift apart; pack voltage is the ground truth (confirmed 2026-08-15)
+
+The two SOCs in the table above diverging does **not** mean the packs hold different charge. Read live on A, twice 20 s apart:
+
+| | Main | Extra |
+|---|---|---|
+| `f32ShowSoc` | 39.0 % | 23.9 % |
+| sum of the 15 `cellVol` | 49.216 V | 49.213 V |
+| `vol` | 49292 | 49304 |
+| `amp` | -1080 | -1147 |
+| `soh` / `fullCap` | 100 / 79902 | 100 / 79964 |
+| `maxVolDiff` | 8 mV | 6 mV |
+
+The cell stacks agree to **3 mV across 15 cells**, both slots are engaged (`ems.openBmsIdx` 3, `bms0Online`/`bms1Online` both 3), and the packs share current ~48/52. Packs bonded to one bus are at the same voltage by construction — a real 15-point charge gap would drive current until it closed. So the packs are equal and the *gauges* are not.
+
+Each pack coulomb-counts its own SOC, and on LFP the mid-range voltage curve is too flat to correct the accumulated error. Corroboration: both packs also report `actSoc`/`targetSoc`, reading 24/24 on Main and 21/21 on Extra — Main's own alternate figure sits 15 points below its display figure and next to Extra's, so Main's gauge is the one that wandered. (Both are undocumented fields; treat the direction as a hypothesis.)
+
+**The counters only re-anchor at full charge, and A almost never gets there** — ≥95 % on 1 logged day in 22. On that day (2026-08-07) the re-anchor is visible in `samples.csv`: 90.7 → 94.6, then 94.8 → 98.5, each in a single 5-minute step while ~125–240 W was flowing. That is ~15 Wh of real energy against steps implying ~270 Wh — the counter snapping, not charge arriving. A then held ≥99 % for ~15 minutes before the A/C pulled it down.
+
+Consequences:
+
+- `ems.f32LcdShowSoc` is the capacity-weighted mean of both gauges (arithmetic verified: 31.595 reproduced exactly), so **every consumer of A's SOC averages one good gauge with one drifted one** — Overview, the balancer's A-full cutoff and emergency floor, and the Backup metric.
+- `remainCap` is SOC × `fullCap`, so `dashboard.py`'s `wh_est` inherits the same error.
+- Remedy is a shore-power charge to 100 % held for a few hours with the A/C off. Solar can't do it here (shade-limited, and the load pulls it straight back down). The A-full cutoff doesn't interfere — it only stops B's transfer, not a wall charge.
+
+Measured gap over time: 4.8 points on 2026-07-27, **15.2 points on 2026-08-15**. Not degradation — `soh` is 100/100 and `fullCap` differs by 0.08 %.
+
+**Not yet ruled out:** every reading was taken at ~1.1 A per pack. A high-resistance connection to the Extra Battery would only show under real current — re-probe during an A/C compressor pull and compare `vol` and `amp` between packs.
 
 ## Transfer accounting: B→A is a transfer, not consumption (measured 2026-08-03)
 

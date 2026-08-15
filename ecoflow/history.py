@@ -52,14 +52,23 @@ def _parse(header, values):
     return row
 
 
+def _read_header(path):
+    with path.open("r", newline="") as f:
+        return next(csv.reader(f), None)
+
+
 def load_rows(path):
     """Rows sorted by time, parsing only bytes appended since the last call."""
     path = Path(path)
     if not path.exists():
         return []
     size = path.stat().st_size
-    # a shrunken file or a changed header means rotation/migration — reload fully
-    if _cache["path"] != str(path) or size < _cache["offset"]:
+    # A shrunken file means rotation. A changed header means poller.migrate()
+    # rewrote every row to append a column, which GROWS the file — so the
+    # size check alone misses it, and seeking to the stale offset lands before
+    # the last row read and re-appends rows already cached. Both mean reload.
+    if (_cache["path"] != str(path) or size < _cache["offset"]
+            or (_cache["header"] and _read_header(path) != _cache["header"])):
         _cache.update(path=str(path), offset=0, rows=[], header=None,
                       first=None, total=0)
     if size == _cache["offset"]:

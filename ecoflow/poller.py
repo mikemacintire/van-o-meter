@@ -28,6 +28,18 @@ QUOTA_MAP = {
     "pd.dsgPowerAc": ("cum_ac_out_wh", 1),
     "pd.dsgPowerDc": ("cum_dc_out_wh", 1),
 }
+# A's two packs each run their own coulomb-counted SOC gauge, and those gauges
+# drift apart — 4.8 points on 2026-07-27, 15.2 on 2026-08-15 — while the packs
+# themselves stay bonded to one bus at the same voltage. Logging both gauges
+# plus both pack voltages is what separates "the gauges disagree" from "the
+# charge really diverged"; `soc` alone (their capacity-weighted mean) hides it.
+# Voltage stays in raw mV: the honest gap is ~12 mV, which volts-to-1dp erases.
+PACK_KEYS = {
+    # ems.bms{slot}Online -> (quota prefix, soc column, millivolt column)
+    0: ("bmsMaster", "pack_main_soc", "pack_main_mv"),
+    1: ("bmsSlave1", "pack_extra_soc", "pack_extra_mv"),
+}
+
 # summed into the derived dc_out_w column
 DC_OUT_KEYS = {
     "mppt.carOutWatts": 10,
@@ -41,6 +53,7 @@ FIELDS = [
     "soc", "solar_w", "watts_in", "watts_out", "ac_charge_w", "chg_state",
     "ac_out_enabled", "ac_out_w", "dc_out_w", "batt_temp",
     "cum_solar_wh", "cum_ac_in_wh", "cum_dc_in_wh", "cum_ac_out_wh", "cum_dc_out_wh",
+    "pack_main_soc", "pack_extra_soc", "pack_main_mv", "pack_extra_mv",
 ]
 HEADER = ["timestamp", "unit"] + FIELDS
 
@@ -56,6 +69,14 @@ def extract_sample(quota):
     sample["dc_out_w"] = round(
         sum((quota.get(k) or 0) / scale for k, scale in DC_OUT_KEYS.items()), 1
     )
+    # `ems.bms{slot}Online` is the only authoritative presence flag: the
+    # bmsSlave1 block ships on B too, carrying stale defaults that pass a null
+    # check (docs/api.md). Blank beats a plausible-looking phantom.
+    for slot, (prefix, soc_col, mv_col) in PACK_KEYS.items():
+        online = quota.get(f"ems.bms{slot}Online")
+        soc = quota.get(f"{prefix}.f32ShowSoc") if online else None
+        sample[soc_col] = round(soc, 1) if soc is not None else None
+        sample[mv_col] = quota.get(f"{prefix}.vol") if online else None
     return sample
 
 

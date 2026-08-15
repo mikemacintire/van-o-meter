@@ -248,6 +248,26 @@ def test_load_rows_reads_appended_tail_only(tmp_path):
     assert rows[1]["soc"] == 51
 
 
+def test_load_rows_reparses_after_a_schema_migration(tmp_path):
+    """poller.migrate() rewrites every row to add a column, so the file GROWS
+    and byte offsets all shift. Seeking to the stale offset would re-read rows
+    already cached and double-count them; a changed header must force a full
+    reparse."""
+    path = tmp_path / "s.csv"
+    old_header = HEADER[:-4]                    # before the per-pack columns
+    blank = "," * (len(old_header) - 3)
+    rows_out = [f"2026-07-25T12:00:{s:02d}+00:00,A,50{blank}" for s in (0, 30)]
+    path.write_text(",".join(old_header) + "\n" + "\n".join(rows_out) + "\n")
+    assert len(load_rows(path)) == 2
+
+    # migrate: same rows, wider header, 4 blank columns appended to each
+    grown = "," * 4
+    path.write_text(",".join(HEADER) + "\n"
+                    + "\n".join(r + grown for r in rows_out) + "\n")
+    assert path.stat().st_size > len(",".join(old_header))
+    assert len(load_rows(path)) == 2
+
+
 def test_load_rows_prunes_old_rows_but_coverage_stays_honest(tmp_path):
     """The in-memory cache caps at RETAIN_DAYS (the CSV keeps everything), yet
     the console's "logging since / N samples" must still describe the full log."""

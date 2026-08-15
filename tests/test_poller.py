@@ -85,3 +85,47 @@ def test_fields_start_with_original_v1_columns():
     """Migration relies on new columns being appended, never reordered."""
     assert FIELDS[:7] == ["soc", "solar_w", "watts_in", "watts_out",
                           "ac_charge_w", "chg_state", "ac_out_enabled"]
+
+
+# --- per-pack columns (added 2026-08-15) ---------------------------------
+# A's two packs run their own SOC gauges and those gauges drift apart; only
+# pack voltage says whether the charge really diverged. See docs/api.md.
+
+TWO_PACK_QUOTA = {
+    "ems.bms0Online": 3, "ems.bms1Online": 3,
+    "bmsMaster.f32ShowSoc": 39.015244, "bmsMaster.vol": 49292,
+    "bmsSlave1.f32ShowSoc": 23.881538, "bmsSlave1.vol": 49304,
+}
+
+
+def test_extract_sample_logs_both_pack_gauges():
+    sample = extract_sample(TWO_PACK_QUOTA)
+    assert sample["pack_main_soc"] == 39.0
+    assert sample["pack_extra_soc"] == 23.9
+
+
+def test_extract_sample_keeps_pack_voltage_in_millivolts():
+    """The main/extra gap is ~12 mV; volts-to-1dp would round it away."""
+    sample = extract_sample(TWO_PACK_QUOTA)
+    assert sample["pack_main_mv"] == 49292
+    assert sample["pack_extra_mv"] == 49304
+
+
+def test_extract_sample_ignores_phantom_extra_pack_on_a_bare_unit():
+    """quota/all ships a full bmsSlave1 block even on B, which has no Extra
+    Battery, and its stale defaults look plausible (docs/api.md). Only
+    ems.bms1Online says whether the slot is real."""
+    bare = dict(TWO_PACK_QUOTA, **{"ems.bms1Online": 0,
+                                   "bmsSlave1.f32ShowSoc": 31.81,
+                                   "bmsSlave1.vol": 49577})
+    sample = extract_sample(bare)
+    assert sample["pack_extra_soc"] is None
+    assert sample["pack_extra_mv"] is None
+    assert sample["pack_main_soc"] == 39.0  # master unaffected
+
+
+def test_extract_sample_pack_columns_absent_without_online_flags():
+    """Presence is never inferred from the pack fields themselves."""
+    sample = extract_sample({"bmsMaster.f32ShowSoc": 39.0, "bmsMaster.vol": 49292})
+    assert sample["pack_main_soc"] is None
+    assert sample["pack_main_mv"] is None
