@@ -353,7 +353,11 @@ h1 {
 .sch-detail { fill: none; stroke: var(--line2); stroke-width: 1.3; }
 .sch-panel { fill: rgba(36,146,186,.05); stroke: var(--line3); stroke-width: 1.4; }
 .sch-cellline { stroke: var(--line2); stroke-width: 1; }
-.sch-box { fill: var(--surface2); stroke: var(--line2); stroke-width: 1.3; }
+.sch-box { fill: var(--surface2); stroke: var(--line2); stroke-width: 1.3; transition: stroke .4s, filter .4s; }
+/* AC outlets energized: the frame glows accent, same rule that lights the flows.
+   Driven by the switch (inv.cfgAcEnabled), not watts — the arrows carry watts. */
+.sch-box.ac-on { stroke: var(--accent); filter: drop-shadow(0 0 6px rgba(79,179,232,.55)); }
+.sch-ac { fill: var(--accent); }
 /* the bus bars bonding Unit A's two packs into one bank */
 .sch-link { fill: var(--line3); }
 /* the neon truck photo: screen blend melts its black field into the card */
@@ -1647,12 +1651,12 @@ function bankBox(id, x0, x1, label, sub, packs) {
                   + `<rect class="sch-link" x="${(bx - gap + 6).toFixed(1)}" y="${BARS.bot - 24}" width="${gap - 12}" height="5" rx="2.5"/>`;
   }
   return `<g>
-    <rect class="sch-box" x="${x0}" y="${y0}" width="${w}" height="${y1 - y0}" rx="12"/>
+    <rect class="sch-box" id="${id}box" x="${x0}" y="${y0}" width="${w}" height="${y1 - y0}" rx="12"/>
     <text class="sch-lbl" x="${x0 + 16}" y="${y0 + 27}">${label}</text>
     ${cells}
     <text class="sch-big" id="${id}soc" x="${cx}" y="${y1 - 30}" text-anchor="middle">—</text>
     <text class="sch-val" id="${id}kwh" x="${cx}" y="${y1 - 9}" text-anchor="middle" fill="var(--muted)">—</text>
-    <text class="sch-tiny" x="${cx}" y="${y1 + 22}" text-anchor="middle">${sub}</text>
+    <text class="sch-tiny" x="${cx}" y="${y1 + 22}" text-anchor="middle">${sub}<tspan id="${id}ac" class="sch-ac"></tspan></text>
   </g>`;
 }
 
@@ -1744,6 +1748,11 @@ function renderSchematic(A, B, transfer) {
     }
     $(id + "soc").textContent = u.soc == null ? "—" : `${u.soc.toFixed(1)}%`;
     $(id + "kwh").textContent = fmtWh(u.wh_est);
+    // AC outlets energized — the switch, not watts (the flows carry watts).
+    // Unknown state (offline flap) renders as off: never claim what we can't see.
+    const acOn = u.ac.out_enabled != null && Number(u.ac.out_enabled) === 1;
+    $(id + "box").classList.toggle("ac-on", acOn);
+    $(id + "ac").textContent = acOn ? " · AC ON" : "";
   }
 }
 

@@ -48,5 +48,11 @@ status only), no icon tiles, no legend anywhere, no legend/header on the truck (
 single-line" is dead), no mono for words, no glow on idle elements. The two stage
 panels and the truck's unit frames are the only card-like objects.
 
-Unresolved: balancer/emergency state has no Overview presence yet (the transfer
-arrow and marquee state imply it); revisit if emergency mode ships more states.
+AC-on indicator (2026-08-18): a unit frame whose AC outlets are energized
+(`ac.out_enabled`, the switch — not watts) glows accent and appends "· AC ON"
+to its sub-line; unknown state renders as off. Spec:
+`docs/superpowers/specs/2026-08-18-ac-on-indicator-design.md`.
+
+Unresolved: balancer/emergency state has no Overview presence yet beyond B's
+AC-on frame showing an armed transfer (the transfer arrow and marquee state
+imply the rest); revisit if emergency mode ships more states.
