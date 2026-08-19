@@ -1,8 +1,11 @@
 """Tests for history aggregation (bucketing, energy deltas, stats)."""
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+from ecoflow import history
 
 from ecoflow.history import (avg_daily_drain, bucket_series, coverage,
                              daily_energy, hourly_profile, load_rows, summarize)
@@ -266,6 +269,43 @@ def test_load_rows_reparses_after_a_schema_migration(tmp_path):
                     + "\n".join(r + grown for r in rows_out) + "\n")
     assert path.stat().st_size > len(",".join(old_header))
     assert len(load_rows(path)) == 2
+
+
+def test_load_rows_is_safe_under_concurrent_callers(tmp_path, monkeypatch):
+    """/api/history and /api/forecast each call load_rows under their OWN lock,
+    so two threads can full-reparse the shared cache at once. Unsynchronized,
+    both append the whole file interleaved: ~2x rows out of chronological
+    order, which daily_energy's drop-negative-deltas turns into a sawtooth of
+    phantom energy (the 84.6 kWh "Today" incident, 2026-08-18)."""
+    path = tmp_path / "s.csv"
+    blank = "," * (len(HEADER) - 13)
+    t0 = datetime(2026, 8, 18, 8, 0, tzinfo=timezone.utc)
+    lines = [",".join(HEADER)]
+    for i in range(500):
+        ts = (t0 + timedelta(seconds=30 * i)).isoformat()
+        lines.append(f"{ts},A,50,100,0,0,0,0,0,0,0,25,{1000 + i}{blank}")
+    path.write_text("\n".join(lines) + "\n")
+
+    real_parse = history._parse
+    monkeypatch.setattr(  # widen the race window so the test fails reliably
+        history, "_parse",
+        lambda h, v: (threading.Event().wait(0.0002), real_parse(h, v))[1])
+
+    barrier = threading.Barrier(2)
+    def hammer():
+        barrier.wait()
+        load_rows(path)
+    threads = [threading.Thread(target=hammer) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    rows = load_rows(path)
+    assert len(rows) == 500
+    assert all(a["dt"] <= b["dt"] for a, b in zip(rows, rows[1:]))
+    out = daily_energy(rows, "A", days=7, now=t0)
+    assert out[0]["solar_wh"] == 499
 
 
 def test_load_rows_prunes_old_rows_but_coverage_stays_honest(tmp_path):

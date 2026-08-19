@@ -9,6 +9,7 @@ Day boundaries use *local* time: a solar day should line up with Mike's day.
 """
 
 import csv
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -33,6 +34,12 @@ RETAIN_DAYS = 45
 
 _cache = {"path": None, "offset": 0, "rows": [], "header": None,
           "first": None, "total": 0}
+# One lock for every _cache mutation: /api/history and /api/forecast each call
+# load_rows under their OWN endpoint lock, so without this two threads can
+# full-reparse concurrently and interleave the whole file into the cache twice.
+# Out-of-order rows turn daily_energy's counter differencing into a sawtooth of
+# phantom energy (the 84.6 kWh "Today" incident, 2026-08-18).
+_lock = threading.Lock()
 
 
 def _parse(header, values):
@@ -58,52 +65,57 @@ def _read_header(path):
 
 
 def load_rows(path):
-    """Rows sorted by time, parsing only bytes appended since the last call."""
+    """Rows sorted by time, parsing only bytes appended since the last call.
+
+    Returns a snapshot copy: the cached list keeps being appended to and
+    pruned by later calls, and callers aggregate outside the lock.
+    """
     path = Path(path)
     if not path.exists():
         return []
-    size = path.stat().st_size
-    # A shrunken file means rotation. A changed header means poller.migrate()
-    # rewrote every row to append a column, which GROWS the file — so the
-    # size check alone misses it, and seeking to the stale offset lands before
-    # the last row read and re-appends rows already cached. Both mean reload.
-    if (_cache["path"] != str(path) or size < _cache["offset"]
-            or (_cache["header"] and _read_header(path) != _cache["header"])):
-        _cache.update(path=str(path), offset=0, rows=[], header=None,
-                      first=None, total=0)
-    if size == _cache["offset"]:
-        return _cache["rows"]
+    with _lock:
+        size = path.stat().st_size
+        # A shrunken file means rotation. A changed header means poller.migrate()
+        # rewrote every row to append a column, which GROWS the file — so the
+        # size check alone misses it, and seeking to the stale offset lands before
+        # the last row read and re-appends rows already cached. Both mean reload.
+        if (_cache["path"] != str(path) or size < _cache["offset"]
+                or (_cache["header"] and _read_header(path) != _cache["header"])):
+            _cache.update(path=str(path), offset=0, rows=[], header=None,
+                          first=None, total=0)
+        if size == _cache["offset"]:
+            return list(_cache["rows"])
 
-    with path.open("r", newline="") as f:
-        if _cache["offset"] == 0:
-            reader = csv.reader(f)
-            try:
-                _cache["header"] = next(reader)
-            except StopIteration:
-                return []
-            _cache["rows"] = []
-        else:
-            f.seek(_cache["offset"])
-            reader = csv.reader(f)
-        header = _cache["header"]
-        for values in reader:
-            if len(values) < 2 or values[0] == "timestamp":
-                continue
-            row = _parse(header, values)
-            if row:
-                _cache["rows"].append(row)
-                _cache["total"] += 1
-                if _cache["first"] is None:
-                    _cache["first"] = row["dt"]
-        _cache["offset"] = f.tell()
-    cutoff = datetime.now().astimezone() - timedelta(days=RETAIN_DAYS)
-    rows = _cache["rows"]
-    keep = 0
-    while keep < len(rows) and rows[keep]["dt"] < cutoff:
-        keep += 1
-    if keep:
-        del rows[:keep]
-    return _cache["rows"]
+        with path.open("r", newline="") as f:
+            if _cache["offset"] == 0:
+                reader = csv.reader(f)
+                try:
+                    _cache["header"] = next(reader)
+                except StopIteration:
+                    return []
+                _cache["rows"] = []
+            else:
+                f.seek(_cache["offset"])
+                reader = csv.reader(f)
+            header = _cache["header"]
+            for values in reader:
+                if len(values) < 2 or values[0] == "timestamp":
+                    continue
+                row = _parse(header, values)
+                if row:
+                    _cache["rows"].append(row)
+                    _cache["total"] += 1
+                    if _cache["first"] is None:
+                        _cache["first"] = row["dt"]
+            _cache["offset"] = f.tell()
+        cutoff = datetime.now().astimezone() - timedelta(days=RETAIN_DAYS)
+        rows = _cache["rows"]
+        keep = 0
+        while keep < len(rows) and rows[keep]["dt"] < cutoff:
+            keep += 1
+        if keep:
+            del rows[:keep]
+        return list(_cache["rows"])
 
 
 def coverage():
@@ -120,8 +132,9 @@ def reload_if_header_changed(path):
         return
     with path.open("r", newline="") as f:
         header = next(csv.reader(f), None)
-    if header and _cache["header"] and header != _cache["header"]:
-        _cache.update(offset=0, rows=[], header=None, first=None, total=0)
+    with _lock:
+        if header and _cache["header"] and header != _cache["header"]:
+            _cache.update(offset=0, rows=[], header=None, first=None, total=0)
 
 
 def _mean(vals):
