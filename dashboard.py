@@ -405,7 +405,9 @@ def api_control():
         while not applied and time.time() < deadline:
             time.sleep(VERIFY_POLL)
             try:
-                quota = client.get_quota_all(sn)
+                # An offline flap serves data:null — keep the last good quota
+                # so the readback in the response stays meaningful.
+                quota = client.get_quota_all(sn) or quota
             except Exception:
                 continue
             applied = controls.matches(key, value, quota)
@@ -414,7 +416,7 @@ def api_control():
         _live_cache["ts"] = 0.0   # next /api/live refetches real state
     return jsonify({
         "applied": applied,
-        "readback": quota.get(ctl["readback"]),
+        "readback": (quota or {}).get(ctl["readback"]),
         "sent": params,
     })
 
@@ -507,7 +509,7 @@ def balancer_tick():
                 while not applied and time.time() < deadline:
                     time.sleep(VERIFY_POLL)
                     try:
-                        quota = client.get_quota_all(sn)
+                        quota = client.get_quota_all(sn) or quota
                     except Exception:
                         continue
                     applied = controls.matches("ac_out", value, quota)

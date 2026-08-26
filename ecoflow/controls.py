@@ -160,8 +160,12 @@ def build_params(key, value, quota=None):
 
 
 def matches(key, value, quota):
-    """True when the readback field reflects the value (string-tolerant)."""
-    rb = quota.get(CONTROLS[key]["readback"])
+    """True when the readback field reflects the value (string-tolerant).
+
+    quota may be None — an offline unit serves data:null — and that is
+    "not confirmed", never a crash.
+    """
+    rb = (quota or {}).get(CONTROLS[key]["readback"])
     try:
         return int(float(rb)) == int(value)
     except (TypeError, ValueError):

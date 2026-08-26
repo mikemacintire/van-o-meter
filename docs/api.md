@@ -42,6 +42,14 @@ No per-pack (Extra Battery) settable params exist — 49/51 are EMS-level and go
 
 Verified by isolation: our signature is correct (tampering with the sign string yields `8521 signature is wrong`, so 1008 is a post-signature params-level verdict), and the byte-identical no-op command succeeded on the online unit while failing on the offline one. `dashboard.py` re-checks `device/list` on any 1008 and reports "unit offline" instead.
 
+## `quota/all` can serve `data: null` mid-flap (observed live 2026-08-25)
+
+During an offline flap the quota endpoint sometimes answers `code 0` with `data: null` instead of stale data — a read that "succeeds" and returns nothing. Any consumer must treat a `None` quota as "no reading", not crash: it took down `/api/control`'s verify loop with a 500 the first time it happened mid-command. `controls.matches` and both verify loops now tolerate it (keep the last good quota, report `applied: false`).
+
+## id 51 (minDsgSoc) may be capped at current SOC (unconfirmed, 2026-08-25)
+
+With B at ~6% SOC, `minDsgSoc: 5` applied but `minDsgSoc: 15` was accepted (`code 0`) with the readback never moving off 5. Consistent with the firmware refusing a discharge floor above the current charge level, but B was also flapping offline that night, so a lost command isn't ruled out. Retry raising the floor when the unit is above the target value.
+
 ## id 38 (beep) accepted but inert (observed 2026-08-03)
 
 On unit B (online, quota fresh): `{"cmdSet":32,"id":38,"enabled":1}` and `enabled:0` both returned `code 0`, yet `pd.beepState` stayed `1` across 20 s of polling in both directions. Tested both polarity hypotheses (doc implies enabled↔beepState direct; HA integrations suggest enabled = "beeper on" i.e. inverted) — neither produced a readback change. Unresolved: silent-no-op firmware quirk, very slow application, or a readback that doesn't track the setting. Needs an ear next to the unit to settle.

@@ -106,6 +106,25 @@ def test_control_rejects_bad_input(web):
         assert http.post("/api/control", json=payload).status_code == 400, payload
 
 
+def test_control_survives_offline_flap_during_verify(web, monkeypatch):
+    # Offline units serve data:null (quota None) — a flap mid-verify must
+    # degrade to applied=False on the last good readback, not crash with a
+    # 500 (found live 2026-08-25, B dropped off the cloud between polls).
+    fake, http = web(BASE_QUOTA, apply=False)
+    real = fake.get_quota_all
+    calls = {"n": 0}
+
+    def flaky(sn):
+        calls["n"] += 1
+        return real(sn) if calls["n"] == 1 else None
+    monkeypatch.setattr(fake, "get_quota_all", flaky)
+    r = http.post("/api/control", json={"unit": "B", "key": "ac_out", "value": 1})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["applied"] is False
+    assert body["readback"] == "0"
+
+
 def test_control_1008_on_offline_unit_names_the_real_cause(web, monkeypatch):
     # EcoFlow answers "1008 check your params" for writes to an offline unit
     # (found live 2026-08-03) — the endpoint must translate that.
