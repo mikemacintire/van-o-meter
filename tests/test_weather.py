@@ -163,3 +163,81 @@ def test_refresh_writes_the_cache_it_fetched(tmp_path):
     days, fetched_at = weather.load(path)
     assert fetched_at == 5000.0
     assert len(days) == 5
+
+
+# ---- current conditions (topbar weather) ----
+
+# Verified live 2026-08-31: this is the exact shape `current=` returns.
+CURRENT_PAYLOAD = {
+    "latitude": 29.805908,
+    "longitude": -81.27963,
+    "timezone": "America/New_York",
+    "current_units": {"temperature_2m": "°C", "weather_code": "wmo code"},
+    "current": {"time": "2026-08-31T17:15", "interval": 900,
+                "temperature_2m": 28.2, "weather_code": 1, "is_day": 1},
+}
+
+
+def fake_current_fetcher(payload=None, boom=None):
+    calls = []
+
+    def fetcher(lat, lon):
+        calls.append({"lat": lat, "lon": lon})
+        if boom:
+            raise boom
+        return weather.parse_current(
+            payload if payload is not None else CURRENT_PAYLOAD)
+
+    fetcher.calls = calls
+    return fetcher
+
+
+def test_parse_current_extracts_the_three_fields():
+    cur = weather.parse_current(CURRENT_PAYLOAD)
+    assert cur == {"temp_c": 28.2, "code": 1, "is_day": True}
+
+
+def test_parse_current_rejects_a_payload_with_no_current_block():
+    with pytest.raises(weather.WeatherError):
+        weather.parse_current({"error": True, "reason": "bad latitude"})
+
+
+def test_refresh_current_fetches_when_no_cache_exists(tmp_path):
+    fetcher = fake_current_fetcher()
+    cur, fetched_at = weather.refresh_current(
+        tmp_path / "now.json", 29.8, -81.25,
+        max_age_s=600, now=5000.0, fetcher=fetcher)
+    assert len(fetcher.calls) == 1
+    assert fetched_at == 5000.0
+    assert cur["temp_c"] == 28.2
+
+
+def test_refresh_current_serves_cache_while_fresh(tmp_path):
+    path = tmp_path / "now.json"
+    fetcher = fake_current_fetcher()
+    weather.refresh_current(path, 29.8, -81.25,
+                            max_age_s=600, now=5000.0, fetcher=fetcher)
+    cur, fetched_at = weather.refresh_current(
+        path, 29.8, -81.25, max_age_s=600, now=5000.0 + 300, fetcher=fetcher)
+    assert len(fetcher.calls) == 1      # inside the TTL: no network at all
+    assert fetched_at == 5000.0
+    assert cur["temp_c"] == 28.2
+
+
+def test_refresh_current_falls_back_to_stale_cache_when_offline(tmp_path):
+    path = tmp_path / "now.json"
+    weather.refresh_current(path, 29.8, -81.25, max_age_s=600, now=5000.0,
+                            fetcher=fake_current_fetcher())
+    boom = fake_current_fetcher(boom=weather.WeatherError("no route to host"))
+    cur, fetched_at = weather.refresh_current(
+        path, 29.8, -81.25, max_age_s=600, now=99999.0, fetcher=boom)
+    assert len(boom.calls) == 1        # it tried
+    assert fetched_at == 5000.0        # and kept the old data, honestly dated
+    assert cur["temp_c"] == 28.2
+
+
+def test_refresh_current_raises_when_offline_with_no_cache(tmp_path):
+    boom = fake_current_fetcher(boom=weather.WeatherError("no route to host"))
+    with pytest.raises(weather.WeatherError):
+        weather.refresh_current(tmp_path / "now.json", 29.8, -81.25,
+                                max_age_s=600, now=1.0, fetcher=boom)

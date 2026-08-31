@@ -32,9 +32,12 @@ BAL_CFG_PATH = Path(__file__).parent / "data" / "balancer.json"
 BAL_LOG_PATH = Path(__file__).parent / "logs" / "balancer.jsonl"
 FC_CFG_PATH = Path(__file__).parent / "data" / "forecast.json"
 WEATHER_PATH = Path(__file__).parent / "data" / "weather.json"
+WEATHER_NOW_PATH = Path(__file__).parent / "data" / "weather_now.json"
 FORECAST_TTL = 1800        # seconds to hold a built forecast payload
 WEATHER_TTL = 3 * 3600     # seconds before Open-Meteo is asked again
 WEATHER_STALE_S = 24 * 3600  # older than this and the UI stops trusting it
+WEATHER_NOW_TTL = 600        # current conditions age out much faster
+WEATHER_NOW_STALE_S = 2 * 3600  # a morning temp shown at dusk is a lie
 FORECAST_AHEAD = 7         # days ahead to request
 PAST_DAYS_MAX = 92         # Open-Meteo's ceiling on past_days
 INSTANCE_LOCK_PORT = 8643   # held by the reloader parent; see __main__
@@ -100,6 +103,10 @@ _hist_lock = threading.Lock()
 # Open-Meteo fetch, and nothing else should have to wait behind that.
 _fc_cache = {"ts": 0.0, "payload": None}
 _fc_lock = threading.Lock()
+# Current conditions share the forecast's isolation reasoning but not its
+# cache: refresh_current() already throttles via its disk TTL, so the lock
+# only stops concurrent tabs racing a fetch.
+_wx_lock = threading.Lock()
 
 
 def _num(q, key, scale=1):
@@ -328,6 +335,27 @@ def api_forecast():
         payload["weather_stale"] = age > WEATHER_STALE_S
         _fc_cache.update(ts=now, payload=payload)
     return jsonify(payload)
+
+
+@app.get("/api/weather")
+def api_weather():
+    """Current conditions for the topbar: temp, WMO code, day/night.
+
+    Same off-grid posture as /api/forecast — a dead uplink serves the cached
+    reading with its honest age, and the frontend hides it once it's stale.
+    """
+    now = time.time()
+    with _wx_lock:
+        cfg = forecast.Config.load(FC_CFG_PATH)
+        try:
+            current, fetched_at = weather.refresh_current(
+                WEATHER_NOW_PATH, cfg.latitude, cfg.longitude,
+                max_age_s=WEATHER_NOW_TTL, now=now)
+        except weather.WeatherError as e:
+            return jsonify({"state": "unavailable", "error": str(e)})
+    age = now - fetched_at
+    return jsonify({**current, "age_s": round(age),
+                    "stale": age > WEATHER_NOW_STALE_S})
 
 
 def _control_via_ble(sn, key, value):

@@ -198,6 +198,20 @@ h1 {
 .clock .t { font-family: var(--mono); font-size: var(--t-md); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .clock .s { font-size: var(--t-micro); color: var(--faint); margin-top: 1px; }
 
+/* Current weather, mirroring the clock's value/sub anatomy: authored stroke
+   icon, mono temperature, condition in words. Hidden outright when the data
+   is missing or stale — a morning temperature shown at dusk is a lie. */
+.wx { display: flex; align-items: center; gap: 10px; white-space: nowrap; text-align: right; }
+.wx[hidden] { display: none; }
+.wx svg {
+  width: 24px; height: 24px; flex: none; stroke: var(--muted);
+  fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+.wx .t { font-family: var(--mono); font-size: var(--t-md); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.wx .s { font-size: var(--t-micro); color: var(--faint); margin-top: 1px; }
+/* composite icons scale sub-shapes; this keeps every line at the same 1.7px */
+.wx svg * { vector-effect: non-scaling-stroke; }
+
 .icon-btn {
   width: 44px; height: 44px; border-radius: var(--r-sm); background: var(--surface2);
   border: 1px solid var(--line); color: var(--muted); cursor: pointer;
@@ -847,9 +861,10 @@ footer code { color: var(--muted); font-family: var(--mono); }
   .marquee { grid-template-columns: 1fr; gap: 16px; }
   .stat-row { grid-template-columns: repeat(2, minmax(0,1fr)); }
 }
-/* Topbar sheds its secondary readouts before it wraps: the freshness line,
-   then the clock. */
+/* Topbar sheds its secondary readouts before it wraps: the weather, then the
+   freshness line, then the clock. */
 @media (max-width: 620px) {
+  .topbar .wx { display: none; }
   .clock .s { display: none; }
 }
 @media (max-width: 460px) {
@@ -866,6 +881,7 @@ footer code { color: var(--muted); font-family: var(--mono); }
   .stat .v { font-size: var(--t-lg); }
   h1 { font-size: var(--t-md); }
   .clock .s { display: none; }
+  .wx .s { display: none; }
   .unit-top { grid-template-columns: minmax(0,1fr); }
   .settings { left: calc(var(--rail) + 8px); right: 8px; min-width: 0; }
   /* the control column can't hold 224px next to a label at this width */
@@ -965,6 +981,10 @@ review, the verdict, and DESIGN.md.
   <h1 id="viewTitle">Power Overview</h1>
   <div class="sys-state"><span class="dot pulse" id="sysDot"></span><span id="sysTxt">connecting…</span></div>
   <div class="spacer"></div>
+  <div class="wx" id="wx" hidden>
+    <svg id="wxIcon" viewBox="0 0 24 24" aria-hidden="true"></svg>
+    <div><div class="t" id="wxT">—</div><div class="s" id="wxS"></div></div>
+  </div>
   <div class="clock"><div class="t" id="clockT">—</div><div class="s" id="clockS">—</div></div>
   <button class="icon-btn" id="refreshBtn" aria-label="Refresh now">
     <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 4v7h-7"/></svg>
@@ -1248,7 +1268,7 @@ const VIEW_TITLE = {
 const HASH_ALIAS = { power: "history", energy: "history", system: "history" };
 
 const state = {
-  view: "overview", range: "24h", live: null, hist: null, hist24: null, fc: null,
+  view: "overview", range: "24h", live: null, hist: null, hist24: null, fc: null, wx: null,
   tempUnit: localStorage.getItem("tempUnit") || "F",
   auto: localStorage.getItem("auto") !== "0",
   railOpen: localStorage.getItem("railOpen") === "1",
@@ -2416,6 +2436,63 @@ async function refreshForecast() {
   } catch (e) { console.error("forecast refresh failed:", e); }
 }
 
+/* ---------- current weather (topbar) ---------- */
+// Authored stroke icons, 24 box. Scaled sub-shapes keep the console's 1.7px
+// stroke via non-scaling-stroke (set in CSS). The front cloud in the "part"
+// composites fills with --bg so it reads as occluding the sun/moon behind it.
+const WX_CLOUD = '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>';
+const WX_CLOUD_HI = `<g transform="translate(.9 -1.6) scale(.92)">${WX_CLOUD}</g>`;
+const WX_ICONS = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2'
+     + 'M5.4 5.4l1.55 1.55M17.05 17.05l1.55 1.55M18.6 5.4l-1.55 1.55M6.95 17.05 5.4 18.6"/>',
+  moon: '<path d="M20.4 13.6A8.4 8.4 0 0 1 10.4 3.6a8.4 8.4 0 1 0 10 10Z"/>',
+  cloud: WX_CLOUD,
+  "part-day": '<g transform="translate(8.8 .6) scale(.56)"><circle cx="12" cy="12" r="4"/>'
+    + '<path d="M12 2.6v2.2M19.2 12h2.2M18.6 5.4l-1.55 1.55M12 19.2v2.2M2.6 12h2.2M5.4 5.4l1.55 1.55"/></g>'
+    + `<g fill="var(--bg)" transform="translate(-1.4 3) scale(.82)">${WX_CLOUD}</g>`,
+  "part-night": '<g transform="translate(10 1.2) scale(.5)"><path d="M20.4 13.6A8.4 8.4 0 0 1 10.4 3.6a8.4 8.4 0 1 0 10 10Z"/></g>'
+    + `<g fill="var(--bg)" transform="translate(-1.4 3) scale(.82)">${WX_CLOUD}</g>`,
+  fog: WX_CLOUD_HI + '<path d="M5.6 18.6h9.6M8.4 21.4h9.6"/>',
+  rain: WX_CLOUD_HI + '<path d="M8.4 18.2l-.9 2.6M12.4 18.2l-.9 2.6M16.4 18.2l-.9 2.6"/>',
+  snow: WX_CLOUD_HI + '<path d="M8.5 18.6h.01M12 20.6h.01M15.5 18.6h.01"/>',
+  storm: WX_CLOUD_HI + '<path d="M12.9 15.4l-2.5 3.4h3.4l-2.5 3.4"/>',
+};
+
+// WMO weather codes (what Open-Meteo's weather_code speaks) -> icon + words
+function wxLook(code, isDay) {
+  const clear = isDay ? "sun" : "moon", part = isDay ? "part-day" : "part-night";
+  if (code === 0) return { icon: clear, word: "clear" };
+  if (code === 1) return { icon: clear, word: "mostly clear" };
+  if (code === 2) return { icon: part, word: "partly cloudy" };
+  if (code === 3) return { icon: "cloud", word: "overcast" };
+  if (code === 45 || code === 48) return { icon: "fog", word: "fog" };
+  if (code >= 51 && code <= 57) return { icon: "rain", word: "drizzle" };
+  if (code >= 61 && code <= 67) return { icon: "rain", word: "rain" };
+  if (code >= 71 && code <= 77) return { icon: "snow", word: "snow" };
+  if (code >= 80 && code <= 82) return { icon: "rain", word: "showers" };
+  if (code === 85 || code === 86) return { icon: "snow", word: "snow showers" };
+  if (code >= 95) return { icon: "storm", word: "thunderstorm" };
+  return null;
+}
+
+function renderWeather(w) {
+  const stale = !w || w.state === "unavailable" || w.stale || w.temp_c == null;
+  $("wx").hidden = stale;
+  if (stale) return;
+  const look = wxLook(w.code, w.is_day);
+  $("wxIcon").innerHTML = look ? WX_ICONS[look.icon] : "";
+  $("wxT").textContent = temp(w.temp_c);
+  $("wxS").textContent = look ? look.word : "";
+}
+
+async function refreshWeather() {
+  try {
+    const w = await (await fetch("/api/weather")).json();
+    state.wx = w;
+    renderWeather(w);
+  } catch (e) { console.error("weather refresh failed:", e); }
+}
+
 async function refreshHistory() {
   try {
     const h = await (await fetch("/api/history?range=" + state.range)).json();
@@ -2481,6 +2558,7 @@ $("unitSeg").addEventListener("click", e => {
   localStorage.setItem("tempUnit", state.tempUnit);
   document.querySelectorAll("#unitSeg button").forEach(x => x.setAttribute("aria-selected", String(x === b)));
   if (state.live) renderLive(state.live);
+  if (state.wx) renderWeather(state.wx);
 });
 async function setWake(on) {
   state.wake = on;
@@ -2526,12 +2604,15 @@ refreshLive();
 refreshHistory();
 refreshBalancer();
 refreshForecast();
+refreshWeather();
 setInterval(() => { if (state.auto) refreshBalancer(); }, 30000);
 setInterval(() => { if (state.auto) refreshLive(); }, 15000);
 setInterval(() => { if (state.auto) refreshHistory(); }, 60000);
 // the weather moves in hours, and the server caches for 30 min — polling it
 // at the history cadence would only burn the truck's uplink for nothing
 setInterval(() => { if (state.auto) refreshForecast(); }, 900000);
+// matches the server's 10-min disk TTL for current conditions
+setInterval(() => { if (state.auto) refreshWeather(); }, 600000);
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => state.hist && renderHistory(state.hist), 250); });
 // the self-hosted fonts land after first paint and reflow the marquee; charts
 // measured against the pre-font layout must be drawn again at the real size

@@ -89,6 +89,34 @@ def fetch(lat, lon, past_days, forecast_days):
     return parse(payload)
 
 
+def parse_current(payload):
+    """Open-Meteo's `current` block -> {temp_c, code, is_day}."""
+    current = payload.get("current") if isinstance(payload, dict) else None
+    if not isinstance(current, dict) or "temperature_2m" not in current:
+        reason = payload.get("reason") if isinstance(payload, dict) else None
+        raise WeatherError(f"no current block in response: {reason or payload}")
+    return {"temp_c": current.get("temperature_2m"),
+            "code": current.get("weather_code"),
+            "is_day": bool(current.get("is_day"))}
+
+
+def fetch_current(lat, lon):
+    """Live current-conditions call. Raises WeatherError on anything unusable."""
+    try:
+        response = requests.get(
+            ENDPOINT,
+            params={"latitude": lat, "longitude": lon,
+                    "current": "temperature_2m,weather_code,is_day",
+                    "timezone": TIMEZONE},
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as e:
+        raise WeatherError(f"open-meteo fetch failed: {e}") from e
+    return parse_current(payload)
+
+
 def load(path):
     """(days, fetched_at) from disk, or (None, None) if absent or unreadable."""
     try:
@@ -127,3 +155,32 @@ def refresh(path, lat, lon, past_days, forecast_days, max_age_s,
         return cached, fetched_at
     store(path, days, now)
     return days, now
+
+
+def refresh_current(path, lat, lon, max_age_s, now=None, fetcher=None):
+    """Cached current-conditions fetch: same policy as refresh(), own file.
+
+    Kept separate from the daily cache because the two age differently — the
+    topbar temperature goes stale in minutes where tomorrow's forecast holds
+    for hours — and one must not evict the other.
+    """
+    now = time.time() if now is None else now
+    fetcher = fetcher or fetch_current
+    path = Path(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        cached, fetched_at = data["current"], float(data["fetched_at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        cached, fetched_at = None, None
+    if cached is not None and fetched_at is not None and now - fetched_at < max_age_s:
+        return cached, fetched_at
+    try:
+        current = fetcher(lat, lon)
+    except WeatherError:
+        if cached is None:
+            raise
+        return cached, fetched_at
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"fetched_at": now, "current": current}),
+                    encoding="utf-8")
+    return current, now
