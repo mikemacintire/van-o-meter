@@ -62,7 +62,9 @@ no light mode use case.
 ```
 --bg       #070A0F   --surface  #10151D   --surface2 #151B24   --surface3 #1C232E
 --ink      #E8EDF4   --muted    #8794A5   --faint    #5A6675
---accent   #4FB3E8   the truck's own blue, sampled from the outline
+--accent   #2F9AD4   the truck's own blue — the tube core of truck.png as rendered
+                     (screen blend @ .95 over --bg), re-sampled 2026-08-31; the old
+                     #4FB3E8 sat visibly paler than the outline it claimed to match
 --accent-dim #2E7FAE
 ```
 `--accent` is nav selection, focus rings, slider thumbs, and active state **only**. It is
@@ -116,6 +118,12 @@ Segmented buttons: min-height 44, min-width 56.
 
 150–220 ms, `cubic-bezier(.2,.7,.3,1)`. Motion reports state change and nothing else.
 No page-load choreography — the console loads into a glance.
+
+Energized glow breathes (2026-08-31): everything carrying power right now — live flow
+paths, arrowheads, an AC-on unit frame — shares one `breathe` cycle, 4.8 s ease-in-out,
+glow swelling from its resting halo to a moderately brighter one and easing back. Calm
+breathing, never a strobe: the quiet phase equals the old static glow, and the loop
+stops under reduced motion (the static glow remains).
 
 `prefers-reduced-motion`: keep state transitions (shortened to 120 ms) so feedback
 survives; stop the looping ones — marching flow dashes, the pulsing dot, the spinner

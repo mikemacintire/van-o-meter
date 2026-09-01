@@ -43,11 +43,13 @@
   --warn: #E3B341;
   --crit: #F0555A;
 
-  /* Chrome accent: the truck's own blue, sampled off the outline (#38A2DE core,
-     #6CC2F0 highlight) so the interface and the centrepiece read as one object.
+  /* Chrome accent: the truck's own blue, so the interface and the centrepiece
+     read as one object. Re-sampled 2026-08-31 from truck.png as rendered (screen
+     blend @ .95 over --bg): tube core averages #2F9AD4, highlight #77C3EB. The
+     old #4FB3E8 sat visibly paler than the tube it claimed to match.
      Nav, focus, selection and slider thumbs only — it carries no data identity,
      which is why the transfer series moved out to --xfer. */
-  --accent: #4FB3E8;
+  --accent: #2F9AD4;
   --accent-dim: #2E7FAE;
 
   --tint-a: rgba(240,168,45,.12);
@@ -56,7 +58,7 @@
   --tint-good: rgba(62,216,138,.12);
   --tint-warn: rgba(227,179,65,.12);
   --tint-crit: rgba(240,85,90,.12);
-  --tint-accent: rgba(79,179,232,.13);
+  --tint-accent: rgba(47,154,212,.13);
 
   /* Type. One superfamily, two faces (Oxanium retired 2026-08-05). Mono is for
      measurement, never for prose — any sentence a human reads is --sans.
@@ -110,7 +112,7 @@ body {
   -webkit-tap-highlight-color: transparent;
   background-image:
     radial-gradient(1100px 560px at 82% -14%, rgba(36,146,186,.10), transparent 64%),
-    radial-gradient(880px 460px at 4% -8%, rgba(79,179,232,.05), transparent 62%);
+    radial-gradient(880px 460px at 4% -8%, rgba(47,154,212,.05), transparent 62%);
   background-attachment: fixed;
 }
 /* Every quantity is mono + tabular so columns of numbers line up and a changing
@@ -370,7 +372,11 @@ h1 {
 .sch-box { fill: var(--surface2); stroke: var(--line2); stroke-width: 1.3; transition: stroke .4s, filter .4s; }
 /* AC outlets energized: the frame glows accent, same rule that lights the flows.
    Driven by the switch (inv.cfgAcEnabled), not watts — the arrows carry watts. */
-.sch-box.ac-on { stroke: var(--accent); filter: drop-shadow(0 0 6px rgba(79,179,232,.55)); }
+.sch-box.ac-on {
+  --fc: var(--accent);
+  stroke: var(--accent); filter: drop-shadow(0 0 6px rgba(47,154,212,.55));
+  animation: breathe 4.8s ease-in-out infinite;
+}
 .sch-ac { fill: var(--accent); }
 /* the bus bars bonding Unit A's two packs into one bank */
 .sch-link { fill: var(--line3); }
@@ -379,11 +385,18 @@ h1 {
 
 /* flows: inert grey until power actually moves, then coloured + marching */
 .flow { fill: none; stroke: var(--line2); stroke-width: 2.2; stroke-linecap: round; transition: stroke .4s; }
-.flow.on { stroke: var(--fc); stroke-dasharray: 7 8; animation: march 1.05s linear infinite; filter: drop-shadow(0 0 4px var(--fc)); }
-.flow.rev.on { animation-direction: reverse; }
+.flow.on { stroke: var(--fc); stroke-dasharray: 7 8; animation: march 1.05s linear infinite, breathe 4.8s ease-in-out infinite; filter: drop-shadow(0 0 4px var(--fc)); }
+.flow.rev.on { animation-direction: reverse; }   /* reverses march; breathe is symmetric, so unchanged */
 @keyframes march { to { stroke-dashoffset: -15; } }
+/* Energized glow breathes: intensity swells and eases like calm breathing, never
+   a strobe. Both frames keep two shadows so the filter interpolates smoothly;
+   the quiet phase matches the old static glow. */
+@keyframes breathe {
+  from, to { filter: drop-shadow(0 0 3px var(--fc)) drop-shadow(0 0 9px transparent); }
+  50%      { filter: drop-shadow(0 0 4px var(--fc)) drop-shadow(0 0 11px var(--fc)); }
+}
 .head { fill: var(--line2); transition: fill .4s; }
-.head.on { fill: var(--fc); filter: drop-shadow(0 0 4px var(--fc)); }
+.head.on { fill: var(--fc); filter: drop-shadow(0 0 4px var(--fc)); animation: breathe 4.8s ease-in-out infinite; }
 .node { fill: var(--surface3); stroke: var(--line2); stroke-width: 1.3; }
 .node.on { stroke: var(--fc); }
 
@@ -690,7 +703,7 @@ footer code { color: var(--muted); font-family: var(--mono); }
   text-transform: uppercase; color: var(--warn); border: 1px solid rgba(227,179,65,.45);
   border-radius: 5px; padding: 3px 9px;
 }
-.fresh-chip.ble { color: var(--accent); border-color: rgba(79,179,232,.5); }
+.fresh-chip.ble { color: var(--accent); border-color: rgba(47,154,212,.5); }
 .ctl-row.pending { opacity: .55; }
 .ctl-row.pending > * { pointer-events: none; }
 .ctl-row.pending::after {
@@ -746,7 +759,7 @@ footer code { color: var(--muted); font-family: var(--mono); }
   border-radius: 5px; padding: 3px 9px; color: var(--muted);
 }
 .bal-state[data-state="transferring"] { color: var(--good); border-color: rgba(62,216,138,.45); }
-.bal-state[data-state="waiting"] { color: var(--accent); border-color: rgba(79,179,232,.5); }
+.bal-state[data-state="waiting"] { color: var(--accent); border-color: rgba(47,154,212,.5); }
 .bal-state[data-state="emergency"] { color: var(--warn); border-color: rgba(227,179,65,.5); }
 .bal-state[data-state="a-full"] { color: var(--good); border-color: rgba(62,216,138,.45); }
 .bal-state[data-state="error"] { color: var(--crit); border-color: rgba(240,85,90,.45); }
@@ -901,6 +914,8 @@ footer code { color: var(--muted); font-family: var(--mono); }
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 120ms !important; }
   .flow.on { animation: none; stroke-dasharray: none; }
+  /* breathing stops; the static glow in each rule's own filter remains */
+  .head.on, .sch-box.ac-on { animation: none; }
   .dot.pulse, .off-badge { animation: none; }
   .sheet { animation: none; }
   .icon-btn.spin svg { animation: none; }
@@ -978,7 +993,7 @@ review, the verdict, and DESIGN.md.
 <main class="main">
 
 <header class="topbar">
-  <h1 id="viewTitle">Power Overview</h1>
+  <h1 id="viewTitle">Van-O-Meter</h1>
   <div class="sys-state"><span class="dot pulse" id="sysDot"></span><span id="sysTxt">connecting…</span></div>
   <div class="spacer"></div>
   <div class="wx" id="wx" hidden>
@@ -1261,7 +1276,7 @@ const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).
 const C = { A: css("--a"), B: css("--b"), load: css("--load"), xfer: css("--xfer"), ink: css("--ink") };
 
 const VIEW_TITLE = {
-  overview: "Power Overview", units: "Unit Detail",
+  overview: "Van-O-Meter", units: "Unit Detail",
   control: "Manual Control", history: "History",
 };
 // old bookmarks and deep links from the 6-view console still land somewhere sane
