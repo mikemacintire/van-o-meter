@@ -61,7 +61,8 @@ no light mode use case.
 ### Chrome — carries no data identity
 ```
 --bg       #070A0F   --surface  #10151D   --surface2 #151B24   --surface3 #1C232E
---ink      #E8EDF4   --muted    #8794A5   --faint    #5A6675
+--ink      #E8EDF4   --muted    #8794A5   --faint    #74818F  (was #5A6675: 3.4:1 under
+                                                              14px hints; now 4.6:1 on --surface)
 --accent   #2F9AD4   the truck's own blue — the tube core of truck.png as rendered
                      (screen blend @ .95 over --bg), re-sampled 2026-08-31; the old
                      #4FB3E8 sat visibly paler than the outline it claimed to match
@@ -143,22 +144,43 @@ OUTPUT, ribbon — with no icon tiles and no mono-set words. See
 - **Panel** (Overview only) — hairline-framed column flanking the truck, titled
   INPUT or OUTPUT: micro title, iconed hero label, mono hero value, then rows
   with label left / value right. Both panels read left-aligned. Shore lives on
-  INPUT (it charges the rig). Dims (`--muted`) when carrying nothing.
+  INPUT (it charges the rig). Dims (`--muted`) when carrying nothing. Sized to
+  its rows and centred on the truck (2026-09-02) — stretched to the band it
+  framed 200px of nothing; and the stage floors each panel at 300px so the
+  height-driven truck yields first instead of clipping "A/C outlets".
 - **Value row** — label left, dotted leader, mono value right; a row with
   nothing to say dims and says it in words ("off", "no sun") set in `--sans`.
   The near-view echo of the Overview panel rows.
 - **Bank bar** — the marquee's segmented charge bar, reused at arm's-length
   size (`.cellwrap.sm`) as each unit card's hero. Ring gauges are retired:
-  one charge language console-wide.
+  one charge language console-wide. Finish (2026-09-02): a lit cell is a
+  tube — vertical gradient (lighter top), 1px light catch along its top edge,
+  the status halo; an unlit cell is a shadowed slot (`rgba(255,255,255,.035)`),
+  never a grey brick. The frame is a 1.5px hairline with an inset dark seam.
 - **Pack table** — per-pack charge / flow / health on the Units view; the one
   home for pack telemetry (the old packs row, System diagnostics and the
   extra-battery card all collapsed into it).
-- **Card** — `--surface`, 1px `--line`, `--r`, `--e1`. Cards never nest, and
-  never wear a colored edge-stripe — unit identity is the 11px swatch in the
-  title. On Overview the only card-like objects are the two stage panels and
-  the unit frames drawn on the truck itself.
+- **Card** — `--surface` with a faint top-down gradient (`#131923 → --surface`),
+  1px `--line`, `--r`, `--e1` plus a 1px inset light catch on the top edge: a
+  machined face, not a flat rectangle. Cards never nest, and never wear a
+  colored edge-stripe — unit identity is the 11px swatch in the title. On
+  Overview the only card-like objects are the two stage panels and the unit
+  frames drawn on the truck itself.
 - **Row** — a control row: label + hint on the left (max 46ch), control on the right in a
   fixed 220px column. Never label-far-left / control-far-right across a full-width card.
+  A full-width settings card splits into columns by rule instead (the balancer:
+  Transfer rule / Emergency rescue, each with a micro sub-head), one column under 1250px.
+- **Switch** — 52×30 with a 44px hit band. On is lit: solid green face, pale knob,
+  a soft `--good` halo (it is carrying power). Off is a dark socket with a grey
+  knob. Keyboard-operable (`tabindex=0`, Space/Enter).
+- **Slider** — the track fills to the thumb in `--accent` (`--p`, set by JS on
+  every paint and drag), so the level reads as a level. Thumb 24px on a dark
+  ring, halo on hover/drag.
+- **Segmented range tabs** — selection speaks the accent tint, the same
+  "you are here" language as the rail. Device-state segments (Control view
+  choices) stay neutral: they report hardware, not location.
+- **Chart areas** — every area fill is a vertical gradient, lit at the top and
+  fading toward the floor (stacked bands per-bbox, SOC fills to zero).
 - **Chip** — status pill, `--disp`, uppercase, 12px.
 - Every interactive element ships default / hover / focus-visible / active / disabled /
   pending. Focus is a 2px `--accent` ring at 2px offset, on everything.

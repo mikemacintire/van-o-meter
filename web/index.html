@@ -26,7 +26,7 @@
   --line3: rgba(255,255,255,.20);
   --ink: #E8EDF4;
   --muted: #8794A5;
-  --faint: #5A6675;
+  --faint: #74818F;   /* 4.6:1 on --surface — the old #5A6675 sat at 3.4:1 under 14px hints */
 
   /* Data series. Validated for the dark surface with the dataviz checker:
      OKLCH lightness band, chroma floor, adjacent CVD separation (worst pair
@@ -226,9 +226,12 @@ h1 {
 .icon-btn.spin svg { animation: spin .7s var(--ease); }
 
 /* ================= cards ================= */
+/* A machined face: a faint top-down gradient and a 1px light catch along the
+   top edge, so the card reads as a panel with a surface, not a flat rectangle. */
 .card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
-  box-shadow: var(--e1);
+  background: linear-gradient(180deg, #131923 0%, var(--surface) 100%);
+  border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--e1), inset 0 1px 0 rgba(255,255,255,.04);
 }
 .card-h {
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
@@ -292,21 +295,29 @@ h1 {
    the truck stores it, the OUTPUT panel draws it. The truck takes every px of
    band height; the panels hug it from both sides. */
 .stage {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* 300px floors on the panels: at 1080p the truck's height-driven width was
+     1300px+ and squeezed the panels to ~200px, where "A/C outlets" clipped to
+     "A/C outle" and "Power out" wrapped. overflow:hidden on the truck cell
+     zeroes its min-content contribution, so the auto track yields first and
+     the truck letterboxes inside whatever is left. */
+  display: grid; grid-template-columns: minmax(300px, 1fr) auto minmax(300px, 1fr);
   gap: clamp(10px, 1.6vw, 34px); align-items: center; min-height: 0; min-width: 0;
 }
-.stage-truck { height: 100%; min-height: 0; min-width: 0; display: flex; align-items: center; justify-content: center; }
+.stage-truck { height: 100%; min-height: 0; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .stage-truck svg { display: block; height: 100%; width: auto; aspect-ratio: 1000 / 504; max-width: 100%; }
 
 /* a panel frames one side of the energy story: hairline frame, INPUT/OUTPUT
    title, hero watts, then per-source rows — label left, value right, no key
    dots. Both panels read left-aligned so the eye lands the same way twice. */
 .panel {
-  align-self: stretch; display: flex; flex-direction: column;
+  /* sized to its rows and centred on the truck: stretched to the band it
+     framed 200px of nothing under "Backup" */
+  align-self: center; display: flex; flex-direction: column;
   gap: clamp(5px, 1vh, 12px); min-width: 0; width: 100%; max-width: 400px;
-  border: 1px solid var(--line2); border-radius: var(--r-lg);
-  background: rgba(255,255,255,.014);
-  padding: clamp(12px, 2.2vh, 24px) clamp(14px, 1.4vw, 26px);
+  border: 1px solid rgba(255,255,255,.10); border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.008));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+  padding: clamp(14px, 2.4vh, 26px) clamp(16px, 1.5vw, 28px);
 }
 .panel-in { justify-self: end; }
 .panel-out { justify-self: start; }
@@ -317,7 +328,7 @@ h1 {
   margin-bottom: clamp(2px, .8vh, 10px);
 }
 .panel-k {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; white-space: nowrap;
   font-family: var(--disp); font-size: var(--f-label); font-weight: 600;
   letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
 }
@@ -369,7 +380,9 @@ h1 {
 .sch-detail { fill: none; stroke: var(--line2); stroke-width: 1.3; }
 .sch-panel { fill: rgba(36,146,186,.05); stroke: var(--line3); stroke-width: 1.4; }
 .sch-cellline { stroke: var(--line2); stroke-width: 1; }
-.sch-box { fill: var(--surface2); stroke: var(--line2); stroke-width: 1.3; transition: stroke .4s, filter .4s; }
+/* translucent, so the neon box lines ghost through the unit frames instead of
+   two opaque slabs sitting on top of the truck */
+.sch-box { fill: rgba(16,21,29,.86); stroke: var(--line2); stroke-width: 1.3; transition: stroke .4s, filter .4s; }
 /* AC outlets energized: the frame glows accent, same rule that lights the flows.
    Driven by the switch (inv.cfgAcEnabled), not watts — the arrows carry watts. */
 .sch-box.ac-on {
@@ -412,20 +425,34 @@ h1 {
 .cells { display: flex; gap: 6px; align-items: stretch; }
 .cellwrap {
   flex: 1 1 auto; display: flex; gap: clamp(2px, .35vw, 5px);
-  border: 2px solid var(--line3); border-radius: 11px; padding: clamp(5px, .7vh, 8px);
+  border: 1.5px solid rgba(255,255,255,.16); border-radius: 11px; padding: clamp(5px, .7vh, 8px);
+  background: rgba(255,255,255,.02);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), inset 0 0 0 1px rgba(0,0,0,.35);
 }
 .cellcap {
   width: 8px; align-self: center; height: clamp(26px, 3.4vh, 42px);
-  background: var(--line3); border-radius: 0 3px 3px 0; flex: none;
+  background: rgba(255,255,255,.16); border-radius: 0 3px 3px 0; flex: none;
 }
+/* An unlit slot is a shadow, not a grey brick — the lit ones carry the bar. */
 .cellwrap i {
   flex: 1 1 0; min-height: clamp(32px, 5.2vh, 62px); border-radius: 3px;
-  background: var(--surface3); transition: background .5s var(--ease), box-shadow .5s var(--ease);
+  background: rgba(255,255,255,.035); box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+  transition: background .5s var(--ease), box-shadow .5s var(--ease);
 }
-/* Energized glow: a lit segment is charge you actually have. */
-.cellwrap i.f { background: var(--good); box-shadow: 0 0 12px rgba(62,216,138,.4); }
-.cellwrap i.f.w { background: var(--warn); box-shadow: 0 0 12px rgba(227,179,65,.4); }
-.cellwrap i.f.c { background: var(--crit); box-shadow: 0 0 12px rgba(240,85,90,.4); }
+/* Energized glow: a lit segment is charge you actually have. The gradient and
+   the 1px light catch along the top give each cell the depth of a lit tube. */
+.cellwrap i.f {
+  background: linear-gradient(180deg, #62E8A8 0%, var(--good) 48%, #2DBD77 100%);
+  box-shadow: 0 0 14px rgba(62,216,138,.38), inset 0 1px 0 rgba(255,255,255,.4);
+}
+.cellwrap i.f.w {
+  background: linear-gradient(180deg, #F0C766 0%, var(--warn) 48%, #C99A2D 100%);
+  box-shadow: 0 0 14px rgba(227,179,65,.38), inset 0 1px 0 rgba(255,255,255,.38);
+}
+.cellwrap i.f.c {
+  background: linear-gradient(180deg, #F7787C 0%, var(--crit) 48%, #D33F45 100%);
+  box-shadow: 0 0 14px rgba(240,85,90,.42), inset 0 1px 0 rgba(255,255,255,.35);
+}
 .bank-read { text-align: left; white-space: nowrap; }
 .bank-read .k {
   font-family: var(--disp); font-size: var(--f-label); font-weight: 600; letter-spacing: .14em;
@@ -478,11 +505,11 @@ h1 {
 .usoc small { font-size: .5em; color: var(--muted); font-weight: 400; }
 .ubar { display: flex; gap: 4px; align-items: center; max-width: 340px; }
 .cellwrap.sm { gap: 2px; border-width: 1.5px; border-radius: 8px; padding: 3px; }
-.cellwrap.sm i { min-height: 13px; border-radius: 2px; }
+.cellwrap.sm i { min-height: 16px; border-radius: 2px; }
 .cellwrap.sm i.f { box-shadow: 0 0 7px rgba(62,216,138,.3); }
 .cellwrap.sm i.f.w { box-shadow: 0 0 7px rgba(227,179,65,.3); }
 .cellwrap.sm i.f.c { box-shadow: 0 0 7px rgba(240,85,90,.3); }
-.cellcap.sm { height: 14px; width: 6px; }
+.cellcap.sm { height: 16px; width: 6px; }
 .ucap { color: var(--muted); font-size: var(--t-sm); }
 .ucap b { font-family: var(--mono); color: var(--ink); font-weight: 500; }
 .chip {
@@ -575,7 +602,8 @@ h1 {
   transition: background .16s var(--ease), color .16s var(--ease);
 }
 .seg button:hover { color: var(--ink); }
-.seg button[aria-selected="true"] { background: var(--surface3); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line2); }
+/* selection speaks the accent, same as the rail: one "you are here" language */
+.seg button[aria-selected="true"] { background: var(--tint-accent); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(47,154,212,.35); }
 .rangebar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
 .cov { color: var(--faint); font-size: var(--t-sm); }
 .stack { display: grid; gap: 14px; }
@@ -626,8 +654,14 @@ footer code { color: var(--muted); font-family: var(--mono); }
   border-radius: 50%; background: var(--faint);
   transition: transform .18s var(--ease), background .18s var(--ease);
 }
-.toggle[aria-checked="true"] { background: rgba(62,216,138,.22); border-color: rgba(62,216,138,.5); }
-.toggle[aria-checked="true"]::after { transform: translateX(22px); background: var(--good); }
+/* On is a lit switch: solid green face, pale knob, a soft halo — it is
+   carrying power. Off is a dark socket with a grey knob. */
+.toggle:hover { border-color: var(--line3); }
+.toggle[aria-checked="true"] {
+  background: linear-gradient(180deg, #4BE09A, #2FBF77); border-color: rgba(62,216,138,.6);
+  box-shadow: 0 0 12px rgba(62,216,138,.28), inset 0 1px 0 rgba(255,255,255,.3);
+}
+.toggle[aria-checked="true"]::after { transform: translateX(22px); background: #F2FBF6; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
 
 .mini-seg { display: flex; gap: 3px; background: var(--surface3); border-radius: 9px; padding: 3px; }
 .mini-seg button {
@@ -681,11 +715,17 @@ footer code { color: var(--muted); font-family: var(--mono); }
 .ctl-row > .toggle, .ctl-row > .mini-seg, .ctl-row > .ctl-slider {
   grid-column: 2; grid-row: 1 / span 2; justify-self: end;
 }
-/* On a full-width card the 1fr text column would strand the control a thousand
-   pixels from its label. A third, empty track absorbs the slack instead, so the
-   pair stays together no matter how wide the card gets. */
-#balCard .ctl-row { grid-template-columns: minmax(0, 54ch) minmax(220px, auto) minmax(0, 1fr); }
-#balCard .ctl-row .hint { max-width: none; }
+/* The balancer's settings split into the two rules they belong to — the normal
+   transfer on the left, the emergency rescue on the right — so a 1900px card
+   holds two readable columns instead of one row of controls stranded mid-void. */
+.bal-grid { display: grid; grid-template-columns: 1fr 1fr; margin-top: 10px; }
+.bal-col + .bal-col { border-left: 1px solid var(--line); }
+.bal-col-h {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px 6px;
+  font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--faint);
+}
+.bal-col-h svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 .risk-tag {
   font-family: var(--disp); font-size: var(--t-micro); font-weight: 600; letter-spacing: .1em;
@@ -726,23 +766,32 @@ footer code { color: var(--muted); font-family: var(--mono); }
   -webkit-appearance: none; appearance: none; flex: 1 1 auto; height: 44px;
   background: none; cursor: pointer; min-width: 110px;
 }
+/* The track fills to the thumb (--p, set by JS on every paint and drag), so the
+   level reads as a level and not as a dot somewhere on a grey line. */
+.ctl-slider input[type=range] { --p: 0%; }
 .ctl-slider input[type=range]::-webkit-slider-runnable-track {
-  height: 6px; border-radius: 3px; background: var(--surface3);
-  border: 1px solid var(--line2);
+  height: 6px; border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent) var(--p), var(--surface3) var(--p));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
 }
 .ctl-slider input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%;
-  background: var(--accent); border: 4px solid var(--surface); margin-top: -10px;
-  box-shadow: var(--e1);
+  -webkit-appearance: none; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent); border: 4px solid #0B1017; margin-top: -9px;
+  box-shadow: 0 0 0 1px rgba(47,154,212,.5), var(--e1);
+  transition: box-shadow .16s var(--ease), background .16s var(--ease);
 }
 .ctl-slider input[type=range]::-moz-range-track {
-  height: 6px; border-radius: 3px; background: var(--surface3); border: 1px solid var(--line2);
+  height: 6px; border-radius: 3px; background: var(--surface3); box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
 }
+.ctl-slider input[type=range]::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--accent); }
 .ctl-slider input[type=range]::-moz-range-thumb {
-  width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
-  border: 4px solid var(--surface); box-shadow: var(--e1);
+  width: 16px; height: 16px; border-radius: 50%; background: var(--accent);
+  border: 4px solid #0B1017; box-shadow: 0 0 0 1px rgba(47,154,212,.5), var(--e1);
 }
-.ctl-slider input[type=range]:active::-webkit-slider-thumb { background: #6CC2F0; }
+.ctl-slider input[type=range]:hover::-webkit-slider-thumb,
+.ctl-slider input[type=range]:active::-webkit-slider-thumb {
+  background: #6CC2F0; box-shadow: 0 0 0 1px rgba(47,154,212,.7), 0 0 0 7px rgba(47,154,212,.16), var(--e1);
+}
 .ctl-val {
   min-width: 62px; text-align: right; font-size: var(--t-md); font-weight: 500;
   flex: none;
@@ -865,6 +914,8 @@ footer code { color: var(--muted); font-family: var(--mono); }
    rows) both need the room. One column below this. */
 @media (max-width: 1250px) {
   .ctl-units { grid-template-columns: 1fr; }
+  .bal-grid { grid-template-columns: 1fr; }
+  .bal-col + .bal-col { border-left: 0; border-top: 1px solid var(--line); }
   .units { grid-template-columns: 1fr; }
   .conduit { flex-direction: row; padding: 16px 0; gap: 14px; }
   .conduit svg { transform: rotate(90deg); width: 46px; }
@@ -898,7 +949,7 @@ footer code { color: var(--muted); font-family: var(--mono); }
   .unit-top { grid-template-columns: minmax(0,1fr); }
   .settings { left: calc(var(--rail) + 8px); right: 8px; min-width: 0; }
   /* the control column can't hold 224px next to a label at this width */
-  .ctl-row, #balCard .ctl-row { grid-template-columns: minmax(0,1fr); row-gap: 12px; }
+  .ctl-row { grid-template-columns: minmax(0,1fr); row-gap: 12px; }
   .ctl-row > .toggle, .ctl-row > .mini-seg, .ctl-row > .ctl-slider {
     grid-column: 1; grid-row: auto; justify-self: start;
   }
@@ -985,8 +1036,8 @@ review, the verdict, and DESIGN.md.
       <button data-u="C" aria-selected="false">°C</button>
     </div>
   </div>
-  <div class="set-row"><span>Keep screen awake</span><div class="toggle" id="wakeTog" role="switch" aria-checked="false"></div></div>
-  <div class="set-row"><span>Auto refresh</span><div class="toggle" id="autoTog" role="switch" aria-checked="true"></div></div>
+  <div class="set-row"><span>Keep screen awake</span><div class="toggle" id="wakeTog" role="switch" aria-checked="false" tabindex="0" aria-label="Keep screen awake"></div></div>
+  <div class="set-row"><span>Auto refresh</span><div class="toggle" id="autoTog" role="switch" aria-checked="true" tabindex="0" aria-label="Auto refresh"></div></div>
 </div>
 
 <!-- ================= main ================= -->
@@ -1116,70 +1167,78 @@ review, the verdict, and DESIGN.md.
   <div class="card" id="balCard" style="margin-bottom:12px">
     <div class="card-h"><h3>Auto balance <span class="note">— B→A transfer automation</span></h3>
       <span class="bal-state" id="balState">—</span></div>
-    <div class="ctl-row">
-      <div class="lbl">Enabled</div>
-      <div class="toggle" id="balEnable" role="switch" aria-checked="false"></div>
-      <div class="hint">Turns Unit B's AC outlets on when B reaches the start level — B's output feeds
-        A's input, so the transfer begins immediately. Off again at the stop level, then it waits for
-        the next fill. How hard A pulls is set by <b>AC Charge Speed</b> on Unit A below (200–1800 W).
-        Manual moves are respected: flip B's AC Output off yourself and the balancer idles until the
-        next fill.</div>
+    <div class="bal-grid">
+    <div class="bal-col">
+      <div class="bal-col-h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h13"/><path d="m13 7 5 5-5 5"/><path d="M20 5v14"/></svg>Transfer rule</div>
+      <div class="ctl-row">
+        <div class="lbl">Enabled</div>
+        <div class="toggle" id="balEnable" role="switch" aria-checked="false" tabindex="0" aria-label="Auto balance enabled"></div>
+        <div class="hint">Turns Unit B's AC outlets on when B reaches the start level — B's output feeds
+          A's input, so the transfer begins immediately. Off again at the stop level, then it waits for
+          the next fill. How hard A pulls is set by <b>AC Charge Speed</b> on Unit A below (200–1800 W).
+          Manual moves are respected: flip B's AC Output off yourself and the balancer idles until the
+          next fill.</div>
+      </div>
+      <div class="ctl-row">
+        <div class="lbl">Start transfer at</div>
+        <div class="ctl-slider">
+          <input type="range" id="balStart" min="80" max="100" step="1" aria-label="Start transfer at">
+          <span class="ctl-val" id="balStart-val">—</span></div>
+      </div>
+      <div class="ctl-row">
+        <div class="lbl">Stop transfer at</div>
+        <div class="ctl-slider">
+          <input type="range" id="balStop" min="20" max="95" step="1" aria-label="Stop transfer at">
+          <span class="ctl-val" id="balStop-val">—</span></div>
+      </div>
+      <div class="ctl-row">
+        <div class="lbl">Cut when A reaches</div>
+        <div class="ctl-slider">
+          <input type="range" id="aFull" min="80" max="100" step="1" aria-label="Cut when A reaches">
+          <span class="ctl-val" id="aFull-val">—</span></div>
+        <div class="hint">A full battery can't absorb the transfer — B's power bypasses to the loads
+          at a double-inversion loss while A's own solar gets curtailed. Always in force, even with
+          auto balance off: it only ever stops a transfer, never starts one.</div>
+      </div>
+      <div class="ctl-row">
+        <div class="lbl">Resume when A drops below</div>
+        <div class="ctl-slider">
+          <input type="range" id="aFullResume" min="50" max="99" step="1" aria-label="Resume when A drops below">
+          <span class="ctl-val" id="aFullResume-val">—</span></div>
+        <div class="hint">Keeps the relay from cycling. Without a gap here, A's loads pull it back
+          under the cut level within minutes and the transfer restarts immediately.</div>
+      </div>
     </div>
-    <div class="ctl-row">
-      <div class="lbl">Start transfer at</div>
-      <div class="ctl-slider">
-        <input type="range" id="balStart" min="80" max="100" step="1">
-        <span class="ctl-val" id="balStart-val">—</span></div>
+    <div class="bal-col">
+      <div class="bal-col-h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v.5"/></svg>Emergency rescue</div>
+      <div class="ctl-row">
+        <div class="lbl">Emergency fallback</div>
+        <div class="toggle" id="emgEnable" role="switch" aria-checked="false" tabindex="0" aria-label="Emergency fallback enabled"></div>
+        <div class="hint">If Unit A falls to the rescue level, B's AC outlets are forced on no matter
+          how empty B is, and stay on — ignoring the stop level — until A climbs back to the
+          stand-down level or B hits its floor. B is never drained below the floor.</div>
+      </div>
+      <div class="ctl-row">
+        <div class="lbl">Rescue A at</div>
+        <div class="ctl-slider">
+          <input type="range" id="emgATrig" min="5" max="40" step="1" aria-label="Rescue A at">
+          <span class="ctl-val" id="emgATrig-val">—</span></div>
+      </div>
+      <div class="ctl-row">
+        <div class="lbl">Stand down at</div>
+        <div class="ctl-slider">
+          <input type="range" id="emgAClear" min="10" max="60" step="1" aria-label="Stand down at">
+          <span class="ctl-val" id="emgAClear-val">—</span></div>
+      </div>
+      <div class="ctl-row">
+        <div class="lbl">Never drain B below</div>
+        <div class="ctl-slider">
+          <input type="range" id="emgBFloor" min="5" max="50" step="1" aria-label="Never drain B below">
+          <span class="ctl-val" id="emgBFloor-val">—</span></div>
+      </div>
     </div>
-    <div class="ctl-row">
-      <div class="lbl">Stop transfer at</div>
-      <div class="ctl-slider">
-        <input type="range" id="balStop" min="20" max="95" step="1">
-        <span class="ctl-val" id="balStop-val">—</span></div>
     </div>
-    <div class="ctl-row">
-      <div class="lbl">Cut when A reaches</div>
-      <div class="ctl-slider">
-        <input type="range" id="aFull" min="80" max="100" step="1">
-        <span class="ctl-val" id="aFull-val">—</span></div>
-      <div class="hint">A full battery can't absorb the transfer — B's power bypasses to the loads
-        at a double-inversion loss while A's own solar gets curtailed. Always in force, even with
-        auto balance off: it only ever stops a transfer, never starts one.</div>
-    </div>
-    <div class="ctl-row">
-      <div class="lbl">Resume when A drops below</div>
-      <div class="ctl-slider">
-        <input type="range" id="aFullResume" min="50" max="99" step="1">
-        <span class="ctl-val" id="aFullResume-val">—</span></div>
-      <div class="hint">Keeps the relay from cycling. Without a gap here, A's loads pull it back
-        under the cut level within minutes and the transfer restarts immediately.</div>
-    </div>
-    <div class="ctl-row">
-      <div class="lbl">Emergency fallback</div>
-      <div class="toggle" id="emgEnable" role="switch" aria-checked="false"></div>
-      <div class="hint">If Unit A falls to the rescue level, B's AC outlets are forced on no matter
-        how empty B is, and stay on — ignoring the stop level above — until A climbs back to the
-        stand-down level or B hits its floor. B is never drained below the floor.</div>
-    </div>
-    <div class="ctl-row">
-      <div class="lbl">Rescue A at</div>
-      <div class="ctl-slider">
-        <input type="range" id="emgATrig" min="5" max="40" step="1">
-        <span class="ctl-val" id="emgATrig-val">—</span></div>
-    </div>
-    <div class="ctl-row">
-      <div class="lbl">Stand down at</div>
-      <div class="ctl-slider">
-        <input type="range" id="emgAClear" min="10" max="60" step="1">
-        <span class="ctl-val" id="emgAClear-val">—</span></div>
-    </div>
-    <div class="ctl-row">
-      <div class="lbl">Never drain B below</div>
-      <div class="ctl-slider">
-        <input type="range" id="emgBFloor" min="5" max="50" step="1">
-        <span class="ctl-val" id="emgBFloor-val">—</span></div>
-    </div>
-    <div class="ctl-note" id="balNote">…</div>
+    <div class="ctl-note" id="balNote" style="padding-top:14px">…</div>
   </div>
   <div class="ctl-units">
     <div class="card unit unit-b ctl-card" id="ctlCardB">
@@ -1447,10 +1506,16 @@ function drawPower(wrap, hist, opts = {}) {
     ? rows.map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)} ${f.y(r.xfer).toFixed(1)}`).join(" ")
     : "";
 
+  // each band fades toward its lower edge — lit at the top where the sun is,
+  // so the stack reads as light landing on the roof rather than two paint slabs
+  const gid = wrap.id + "-g";
+  const grad = (id, c) => `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${c}" stop-opacity=".72"/><stop offset="1" stop-color="${c}" stop-opacity=".22"/></linearGradient>`;
   wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">
+    <defs>${grad(gid + "A", C.A)}${grad(gid + "B", C.B)}</defs>
     ${f.grid}
-    <g fill="${C.A}" fill-opacity=".55" stroke="${C.A}" stroke-width="1">${area("solA", () => 0)}</g>
-    <g fill="${C.B}" fill-opacity=".55" stroke="${C.B}" stroke-width="1">${area("solB", r => r.solA)}</g>
+    <g fill="url(#${gid}A)" stroke="${C.A}" stroke-width="1" stroke-linejoin="round">${area("solA", () => 0)}</g>
+    <g fill="url(#${gid}B)" stroke="${C.B}" stroke-width="1" stroke-linejoin="round">${area("solB", r => r.solA)}</g>
     ${hasXfer ? `<path d="${xferLine}" fill="none" stroke="${C.xfer}" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ""}
     <path d="${loadLine}" fill="none" stroke="${C.load}" stroke-width="2" stroke-linejoin="round"/>
     <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
@@ -1501,13 +1566,19 @@ function drawSoc(wrap, hist, opts = {}) {
   // brightnesses of the truck blue); opts.endLabels names each line where it
   // ends, replacing a legend the eye would have to cross-reference.
   const col = opts.colors || C;
-  let lines = "", ends = "";
+  let lines = "", ends = "", defs = "", fills = "";
   const endPts = [];
+  const gid = wrap.id + "-g", y0 = f.y(0);
   for (const u of ["A", "B"]) {
     if (!pts[u].length) continue;
     const d = pts[u].map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${f.y(p.v).toFixed(1)}`).join(" ");
-    const last = pts[u][pts[u].length - 1];
-    lines += `<path d="${d}" fill="none" stroke="${col[u]}" stroke-width="2" stroke-linejoin="round"/>`;
+    const last = pts[u][pts[u].length - 1], first = pts[u][0];
+    // a soft fill under each line, fading to nothing at the floor: the stored
+    // charge reads as a volume, not a wire, from across the box
+    defs += `<linearGradient id="${gid}${u}" gradientUnits="userSpaceOnUse" x1="0" y1="${f.T}" x2="0" y2="${y0.toFixed(1)}">
+      <stop offset="0" stop-color="${col[u]}" stop-opacity=".2"/><stop offset="1" stop-color="${col[u]}" stop-opacity="0"/></linearGradient>`;
+    fills += `<path d="${d} L${x(last.t).toFixed(1)} ${y0.toFixed(1)} L${x(first.t).toFixed(1)} ${y0.toFixed(1)} Z" fill="url(#${gid}${u})"/>`;
+    lines += `<path d="${d}" fill="none" stroke="${col[u]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     ends += `<circle cx="${x(last.t).toFixed(1)}" cy="${f.y(last.v).toFixed(1)}" r="3.5" fill="${col[u]}" stroke="var(--surface)" stroke-width="2"/>`;
     endPts.push({ u, x: x(last.t), y: f.y(last.v) });
   }
@@ -1522,7 +1593,7 @@ function drawSoc(wrap, hist, opts = {}) {
     }).join("");
   }
   wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">
-    ${f.grid}${lines}${ends}${tags}
+    <defs>${defs}</defs>${f.grid}${fills}${lines}${ends}${tags}
     <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
   </svg><div class="tooltip"></div>`;
   attachTooltip(wrap, wrap.querySelector("svg"), mx => {
@@ -1627,10 +1698,13 @@ function drawProfile(wrap, hist) {
   rows.forEach(r => {
     const cx = L + slot * (r.hour + 0.5);
     const y1 = f.y(r.solar), h = Math.max(0, f.y(0) - y1);
-    if (h > 0.5) bars += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="${Math.min(4, h / 2)}" fill="${C.A}" fill-opacity=".85"/>`;
+    if (h > 0.5) bars += `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y1.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" rx="${Math.min(4, h / 2)}" fill="url(#${wrap.id}-g)"/>`;
     line += `${r.hour ? "L" : "M"}${cx.toFixed(1)} ${f.y(r.load).toFixed(1)}`;
   });
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">${f.grid}${bars}
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">
+    <defs><linearGradient id="${wrap.id}-g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${C.A}" stop-opacity=".95"/><stop offset="1" stop-color="${C.A}" stop-opacity=".45"/></linearGradient></defs>
+    ${f.grid}${bars}
     <path d="${line}" fill="none" stroke="${C.load}" stroke-width="2" stroke-linejoin="round"/>
     <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
   </svg><div class="tooltip"></div>`;
@@ -2115,17 +2189,25 @@ let CTL = [];                  // registry from /api/controls
 const ctlBusy = new Set();     // "B:ac_out" rows awaiting readback verify
 let ctlDrag = null;            // slider tag while the thumb is held
 
+/* The slider track fills up to the thumb: --p is the value as a percentage of
+   the range, read by the track's gradient. Called on every paint and drag. */
+function rangeFill(el) {
+  const min = +el.min || 0, max = +el.max || 100;
+  el.style.setProperty("--p", (100 * (+el.value - min) / (max - min)).toFixed(1) + "%");
+}
+
 function ctlRowHtml(u, c) {
   const id = `ctl-${u}-${c.key}`;
   let widget;
+  const name = `${c.label} · Unit ${u}`;
   if (c.kind === "toggle") {
-    widget = `<div class="toggle" id="${id}" role="switch" aria-checked="false" data-u="${u}" data-key="${c.key}"></div>`;
+    widget = `<div class="toggle" id="${id}" role="switch" aria-checked="false" tabindex="0" aria-label="${name}" data-u="${u}" data-key="${c.key}"></div>`;
   } else if (c.kind === "choice") {
-    widget = `<div class="mini-seg ctl-seg" id="${id}" data-u="${u}" data-key="${c.key}">`
+    widget = `<div class="mini-seg ctl-seg" id="${id}" role="group" aria-label="${name}" data-u="${u}" data-key="${c.key}">`
       + c.choices.map(([v, l]) => `<button data-v="${v}">${l}</button>`).join("") + `</div>`;
   } else {
     widget = `<div class="ctl-slider">
-      <input type="range" id="${id}" min="${c.min}" max="${c.max}" step="${c.step}" data-u="${u}" data-key="${c.key}">
+      <input type="range" id="${id}" min="${c.min}" max="${c.max}" step="${c.step}" aria-label="${name}" data-u="${u}" data-key="${c.key}">
       <span class="ctl-val" id="${id}-val">—</span></div>`;
   }
   const hint = c.help ? `<div class="hint">${c.help}</div>` : "";
@@ -2167,6 +2249,7 @@ function updateControls(d) {
         el.querySelectorAll("button").forEach(b => b.setAttribute("aria-selected", String(+b.dataset.v === v)));
       } else {
         el.value = v;
+        rangeFill(el);
         // 128 is the firmware's "auto brightness" sentinel, not a percent
         $(el.id + "-val").textContent =
           c.key === "lcd_brightness" && v === 128 ? "auto" : v + (c.unit || "");
@@ -2184,6 +2267,7 @@ function confirmSheet(u, c, value) {
     $("sheetTitle").textContent = `${c.label} · Unit ${u}`;
     $("sheetMsg").innerHTML = ctlContext(u, c, value, target);
     $("sheetVeil").classList.add("open");
+    $("sheetNo").focus();   // the safe answer takes focus; Enter never fires a command by accident
   });
 }
 function sheetDone(ok) {
@@ -2193,6 +2277,9 @@ function sheetDone(ok) {
 $("sheetGo").addEventListener("click", () => sheetDone(true));
 $("sheetNo").addEventListener("click", () => sheetDone(false));
 $("sheetVeil").addEventListener("click", e => { if (e.target === $("sheetVeil")) sheetDone(false); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("sheetVeil").classList.contains("open")) sheetDone(false);
+});
 
 function ctlContext(u, c, value, target) {
   const live = state.live?.units?.[u];
@@ -2277,8 +2364,16 @@ $("view-control").addEventListener("input", e => {
   const s = e.target.closest("input[type=range]");
   if (!s) return;
   ctlDrag = s.dataset.u + ":" + s.dataset.key;
+  rangeFill(s);
   const c = CTL.find(x => x.key === s.dataset.key);
   $(s.id + "-val").textContent = s.value + (c?.unit || "");
+});
+/* Switches are divs with role=switch; Space and Enter must flip them like a
+   real button would, or the keyboard can't operate the console at all. */
+document.addEventListener("keydown", e => {
+  if (e.key !== " " && e.key !== "Enter") return;
+  const sw = e.target.closest?.('[role="switch"]');
+  if (sw) { e.preventDefault(); sw.click(); }
 });
 $("view-control").addEventListener("change", e => {
   const s = e.target.closest("input[type=range]");
@@ -2301,6 +2396,7 @@ function renderBalancer(d) {
                              ["emgAClear", "emergency_a_clear_soc"],
                              ["emgBFloor", "emergency_b_floor"]]) {
       $(id).value = d.config[key];
+      rangeFill($(id));
       $(id + "-val").textContent = d.config[key] + "%";
     }
   }
@@ -2363,6 +2459,7 @@ for (const [id, key] of [["balStart", "start_soc"], ["balStop", "stop_soc"],
   $(id).addEventListener("input", e => {
     e.stopPropagation();
     balHold = true;
+    rangeFill(e.target);
     $(id + "-val").textContent = e.target.value + "%";
   });
   $(id).addEventListener("change", e => {
