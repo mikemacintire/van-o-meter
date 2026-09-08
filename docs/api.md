@@ -46,6 +46,13 @@ Verified by isolation: our signature is correct (tampering with the sign string 
 
 During an offline flap the quota endpoint sometimes answers `code 0` with `data: null` instead of stale data — a read that "succeeds" and returns nothing. Any consumer must treat a `None` quota as "no reading", not crash: it took down `/api/control`'s verify loop with a 500 the first time it happened mid-command. `controls.matches` and both verify loops now tolerate it (keep the last good quota, report `applied: false`).
 
+## `quota/all` replays a frozen snapshot for hours, and can mix fresh and frozen modules (observed 2026-09-07)
+
+The night of 2026-09-07 unit A's payload was byte-identical for 44 min, 4.0 h, 4.2 h, 81 min and 74 min in a row (`code 0` throughout) while unit B updated every 30 s from the same machine — the truck's WiFi, not the poller. The poller now logs `stale` = 1 for an identical payload and the History charts treat such rows as no data (see CLAUDE.md). Two finer behaviours seen at the reconnects:
+
+- The first reads after a freeze can be **partial**: `ems.*`/`bms*` keys present, `pd.*`/`inv.*`/`mppt.*` absent. The poller writes those rows with blanks.
+- A read can be **mixed**: fresh `ems.*`/`bms*` values alongside a `pd.*` block still frozen at the pre-outage counters (at 03:39 UTC `pd.dsgPowerAc` read 77150, the 23:37 value, while `ems.f32LcdShowSoc` had already dropped 6.5 points). The cloud caches per module. A counter delta anchored on such a row attributes the outage's energy to the wrong half of it; the total is still correct.
+
 ## id 51 (minDsgSoc) may be capped at current SOC (unconfirmed, 2026-08-25)
 
 With B at ~6% SOC, `minDsgSoc: 5` applied but `minDsgSoc: 15` was accepted (`code 0`) with the readback never moving off 5. Consistent with the firmware refusing a discharge floor above the current charge level, but B was also flapping offline that night, so a lost command isn't ruled out. Retry raising the floor when the unit is above the target value.

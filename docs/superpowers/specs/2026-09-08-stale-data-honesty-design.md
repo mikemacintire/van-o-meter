@@ -62,6 +62,20 @@ measurement of charge there is.
   backfill script.
 - The per-unit "last row" survives incremental tail parses (it lives in
   `_cache`) and is reset with the rest of the cache on a full reparse.
+- **Refinement during implementation:** whichever signal says "identical"
+  (the poller flag or the 19-column comparison), a row is stale only once
+  the reading has sat unchanged for `STALE_AFTER_S` = 300 s, the same
+  threshold as the Overview's "data frozen" badge. Without it, a live idle
+  unit's 19 columns can repeat for a few minutes (SOC ticks 0.1 % every
+  ~6 min at 36 W; LFP pack mV sits flat), and the derived flag striped
+  Unit A's night with false five-minute gaps. `load_rows` tracks
+  `frozen_since` per row for this.
+- **Known limit found on the real data:** the cloud caches per module. After
+  the 2026-09-07 freeze the first full read carried fresh BMS values but a
+  `pd.*` block still frozen at the pre-outage counters, so the bridge for
+  the second half of the night reports the whole outage's 216 Wh across
+  4.2 h and the first half stays an unbridged gap. Energy total right,
+  timing late. Documented in docs/api.md; not worth a per-module flag yet.
 
 ### 3. Aggregations ignore stale rows
 
@@ -117,11 +131,13 @@ the styling says which is which.
   fill continues through bridged buckets (they carry real energy) but breaks
   at gaps. The tooltip appends "avg over outage" to a bridged value and shows
   "no data" for a gap.
-- `drawSoc`: gaps become breaks in the line and fill. Between the last point
-  before a gap and the first point after it, a **dotted** straight segment
-  is drawn (`stroke-dasharray="2 4"`), because a straight interpolation
-  across an outage is far closer to the truth than a plateau and a cliff.
-  The Overview ribbon calls the same function and inherits this.
+- `drawSoc`: gaps become breaks in the line. Between the last point before
+  a gap and the first point after it, a **dotted** straight segment is
+  drawn (`stroke-dasharray="2 4"`), because a straight interpolation across
+  an outage is far closer to the truth than a plateau and a cliff. The soft
+  fill under the line stays one continuous volume across gaps (breaking it
+  striped the chart on a flaky night). The Overview ribbon calls the same
+  function and inherits this.
 - `drawProfile` and `drawDaily` need no change (they consume
   `hourly_profile` and `daily_energy`).
 - A one-line legend note under the power chart: "dashed = average from the
