@@ -1,5 +1,6 @@
 """Tests for history aggregation (bucketing, energy deltas, stats)."""
 
+import csv
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -17,6 +18,12 @@ def row(dt, unit="A", **cols):
         (c for c in HEADER if c not in ("timestamp", "unit")), None)
     base.update(cols)
     return {"timestamp": dt.isoformat(), "unit": unit, "dt": dt, **base}
+
+
+def _ts(offset_s=0):
+    """A recent ISO timestamp: rows older than RETAIN_DAYS are pruned on load."""
+    return (datetime.now(timezone.utc) - timedelta(hours=2)
+            + timedelta(seconds=offset_s)).isoformat(timespec="seconds")
 
 
 @pytest.fixture
@@ -242,10 +249,10 @@ def test_load_rows_reads_appended_tail_only(tmp_path):
     path = tmp_path / "s.csv"
     header = ",".join(HEADER)
     blank = "," * (len(HEADER) - 3)
-    path.write_text(f"{header}\n2026-07-25T12:00:00+00:00,A,50{blank}\n")
+    path.write_text(f"{header}\n{_ts()},A,50{blank}\n")
     assert len(load_rows(path)) == 1
     with path.open("a") as f:
-        f.write(f"2026-07-25T12:00:30+00:00,A,51{blank}\n")
+        f.write(f"{_ts(30)},A,51{blank}\n")
     rows = load_rows(path)
     assert len(rows) == 2
     assert rows[1]["soc"] == 51
@@ -259,7 +266,7 @@ def test_load_rows_reparses_after_a_schema_migration(tmp_path):
     path = tmp_path / "s.csv"
     old_header = HEADER[:-4]                    # before the per-pack columns
     blank = "," * (len(old_header) - 3)
-    rows_out = [f"2026-07-25T12:00:{s:02d}+00:00,A,50{blank}" for s in (0, 30)]
+    rows_out = [f"{_ts(s)},A,50{blank}" for s in (0, 30)]
     path.write_text(",".join(old_header) + "\n" + "\n".join(rows_out) + "\n")
     assert len(load_rows(path)) == 2
 
@@ -323,3 +330,41 @@ def test_load_rows_prunes_old_rows_but_coverage_stays_honest(tmp_path):
     assert cov["samples"] == 2
     assert abs(datetime.fromisoformat(cov["first"])
                - datetime.fromisoformat(old)) < timedelta(seconds=1)
+
+
+def _write(path, header, rows):
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+
+
+def test_load_rows_derives_stale_from_repeated_readings(tmp_path):
+    p = tmp_path / "s.csv"
+    old = [c for c in HEADER if c != "stale"]
+    base = [_ts(), "A", 39.0, 0, 0, 5, 0, 1, 1, 0, 5.0, 30,
+            63191, 68622, 0, 77150, 525, 31.9, 46.2, 49374, 49373]
+    rows = [base, [_ts(30)] + base[1:],
+            [_ts(60), "B"] + base[2:],                 # other unit: fresh
+            [_ts(4 * 3600), "A", 32.5] + base[3:]]     # changed: fresh
+    _write(p, old, rows)
+    got = load_rows(p)
+    assert [r["stale"] for r in got] == [0, 1, 0, 0]
+
+
+def test_load_rows_derivation_survives_tail_read(tmp_path):
+    p = tmp_path / "s.csv"
+    old = [c for c in HEADER if c != "stale"]
+    base = [_ts(), "A", 39.0] + [0] * (len(old) - 3)
+    _write(p, old, [base])
+    load_rows(p)
+    with p.open("a", newline="") as f:
+        csv.writer(f).writerow([_ts(30)] + base[1:])
+    assert [r["stale"] for r in load_rows(p)] == [0, 1]
+
+
+def test_load_rows_keeps_logged_stale_flag(tmp_path):
+    p = tmp_path / "s.csv"
+    base = [_ts(), "A", 39.0] + [0] * (len(HEADER) - 4)
+    _write(p, HEADER, [base + [0], [_ts(30)] + base[1:] + [1]])
+    assert [r["stale"] for r in load_rows(p)] == [0, 1]

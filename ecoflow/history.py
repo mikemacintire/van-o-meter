@@ -17,6 +17,7 @@ NUMERIC = {
     "soc", "solar_w", "watts_in", "watts_out", "ac_charge_w", "chg_state",
     "ac_out_enabled", "ac_out_w", "dc_out_w", "batt_temp",
     "cum_solar_wh", "cum_ac_in_wh", "cum_dc_in_wh", "cum_ac_out_wh", "cum_dc_out_wh",
+    "stale",
 }
 # cumulative counter -> per-period energy name
 ENERGY = {
@@ -33,7 +34,9 @@ AC_ON_W = 50  # inverter output above this counts as "the A/C is running"
 RETAIN_DAYS = 45
 
 _cache = {"path": None, "offset": 0, "rows": [], "header": None,
-          "first": None, "total": 0}
+          "first": None, "total": 0, "last": {}}
+# columns that identify or annotate a row rather than describe the reading
+_NOT_A_READING = {"timestamp", "unit", "dt", "stale"}
 # One lock for every _cache mutation: /api/history and /api/forecast each call
 # load_rows under their OWN endpoint lock, so without this two threads can
 # full-reparse concurrently and interleave the whole file into the cache twice.
@@ -59,6 +62,10 @@ def _parse(header, values):
     return row
 
 
+def _same_reading(a, b):
+    return all(a.get(k) == b.get(k) for k in a if k not in _NOT_A_READING)
+
+
 def _read_header(path):
     with path.open("r", newline="") as f:
         return next(csv.reader(f), None)
@@ -82,7 +89,7 @@ def load_rows(path):
         if (_cache["path"] != str(path) or size < _cache["offset"]
                 or (_cache["header"] and _read_header(path) != _cache["header"])):
             _cache.update(path=str(path), offset=0, rows=[], header=None,
-                          first=None, total=0)
+                          first=None, total=0, last={})
         if size == _cache["offset"]:
             return list(_cache["rows"])
 
@@ -103,6 +110,15 @@ def load_rows(path):
                     continue
                 row = _parse(header, values)
                 if row:
+                    # Rows logged before the stale column existed: a reading
+                    # identical to the unit's previous one is the cloud replaying
+                    # a frozen snapshot (docs/api.md). Fixes history retroactively.
+                    prev = _cache["last"].get(row["unit"])
+                    if row.get("stale") is None:
+                        row["stale"] = int(prev is not None and _same_reading(row, prev))
+                    else:
+                        row["stale"] = int(row["stale"])
+                    _cache["last"][row["unit"]] = row
                     _cache["rows"].append(row)
                     _cache["total"] += 1
                     if _cache["first"] is None:
@@ -134,7 +150,8 @@ def reload_if_header_changed(path):
         header = next(csv.reader(f), None)
     with _lock:
         if header and _cache["header"] and header != _cache["header"]:
-            _cache.update(offset=0, rows=[], header=None, first=None, total=0)
+            _cache.update(offset=0, rows=[], header=None, first=None, total=0,
+                          last={})
 
 
 def _mean(vals):
