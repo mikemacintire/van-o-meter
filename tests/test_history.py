@@ -340,34 +340,44 @@ def _write(path, header, rows):
 
 
 def test_load_rows_derives_stale_from_repeated_readings(tmp_path):
+    """Rows logged before the stale column: an unchanged reading is stale once
+    it has sat still for STALE_AFTER_S (300 s), never before."""
     p = tmp_path / "s.csv"
     old = [c for c in HEADER if c != "stale"]
     base = [_ts(), "A", 39.0, 0, 0, 5, 0, 1, 1, 0, 5.0, 30,
             63191, 68622, 0, 77150, 525, 31.9, 46.2, 49374, 49373]
-    rows = [base, [_ts(30)] + base[1:],
-            [_ts(60), "B"] + base[2:],                 # other unit: fresh
-            [_ts(4 * 3600), "A", 32.5] + base[3:]]     # changed: fresh
+    rows = [[_ts(30 * k)] + base[1:] for k in range(12)]       # 0 .. 330 s, identical
+    rows += [[_ts(60), "B"] + base[2:],                         # other unit: fresh
+             [_ts(360), "A", 32.5] + base[3:]]                  # changed: fresh
     _write(p, old, rows)
     got = load_rows(p)
-    assert [r["stale"] for r in got] == [0, 1, 0, 0]
+    flags = {r["unit"]: [] for r in got}
+    for r in got:
+        flags[r["unit"]].append(r["stale"])
+    assert flags["A"] == [0] * 10 + [1, 1, 0]
+    assert flags["B"] == [0]
 
 
 def test_load_rows_derivation_survives_tail_read(tmp_path):
     p = tmp_path / "s.csv"
     old = [c for c in HEADER if c != "stale"]
     base = [_ts(), "A", 39.0] + [0] * (len(old) - 3)
-    _write(p, old, [base])
+    _write(p, old, [[_ts(30 * k)] + base[1:] for k in range(10)])   # 0 .. 270 s
     load_rows(p)
     with p.open("a", newline="") as f:
-        csv.writer(f).writerow([_ts(30)] + base[1:])
-    assert [r["stale"] for r in load_rows(p)] == [0, 1]
+        csv.writer(f).writerows([[_ts(300)] + base[1:], [_ts(330)] + base[1:]])
+    assert [r["stale"] for r in load_rows(p)] == [0] * 10 + [1, 1]
 
 
-def test_load_rows_keeps_logged_stale_flag(tmp_path):
+def test_load_rows_applies_the_threshold_to_the_poller_flag(tmp_path):
+    """The poller flags every identical tick; the first five minutes of a
+    freeze still count as fresh, and a changed payload resets the clock."""
     p = tmp_path / "s.csv"
     base = [_ts(), "A", 39.0] + [0] * (len(HEADER) - 4)
-    _write(p, HEADER, [base + [0], [_ts(30)] + base[1:] + [1]])
-    assert [r["stale"] for r in load_rows(p)] == [0, 1]
+    rows = [base + [0]] + [[_ts(30 * k)] + base[1:] + [1] for k in range(1, 12)]
+    rows += [[_ts(360)] + base[1:] + [0], [_ts(390)] + base[1:] + [1]]
+    _write(p, HEADER, rows)
+    assert [r["stale"] for r in load_rows(p)] == [0] * 10 + [1, 1] + [0, 0]
 
 
 def test_bucket_series_skips_stale_rows_and_emits_none_buckets(t0):

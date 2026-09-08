@@ -48,7 +48,13 @@ RETAIN_DAYS = 45
 _cache = {"path": None, "offset": 0, "rows": [], "header": None,
           "first": None, "total": 0, "last": {}}
 # columns that identify or annotate a row rather than describe the reading
-_NOT_A_READING = {"timestamp", "unit", "dt", "stale"}
+_NOT_A_READING = {"timestamp", "unit", "dt", "stale", "frozen_since"}
+# An unchanged reading only counts as frozen once it has sat still this long.
+# A live idle unit can repeat its 19 logged columns for a few minutes (SOC
+# ticks 0.1 % every ~6 min at 36 W, pack mV sits flat on LFP), and a snapshot
+# under five minutes old is near enough the truth. Same threshold the
+# Overview's "data frozen" badge uses.
+STALE_AFTER_S = 300
 # One lock for every _cache mutation: /api/history and /api/forecast each call
 # load_rows under their OWN endpoint lock, so without this two threads can
 # full-reparse concurrently and interleave the whole file into the cache twice.
@@ -122,14 +128,18 @@ def load_rows(path):
                     continue
                 row = _parse(header, values)
                 if row:
-                    # Rows logged before the stale column existed: a reading
-                    # identical to the unit's previous one is the cloud replaying
-                    # a frozen snapshot (docs/api.md). Fixes history retroactively.
+                    # The poller's flag says "payload identical to last tick";
+                    # rows logged before it existed get the same verdict from
+                    # the 19 logged columns. Either way a reading is stale only
+                    # after it has sat unchanged for STALE_AFTER_S — the cloud
+                    # replaying a frozen snapshot (docs/api.md), not an idle unit.
                     prev = _cache["last"].get(row["unit"])
-                    if row.get("stale") is None:
-                        row["stale"] = int(prev is not None and _same_reading(row, prev))
-                    else:
-                        row["stale"] = int(row["stale"])
+                    same = (row["stale"] if row.get("stale") is not None
+                            else prev is not None and _same_reading(row, prev))
+                    row["frozen_since"] = (prev.get("frozen_since") or prev["dt"]) \
+                        if same and prev is not None else None
+                    row["stale"] = int(row["frozen_since"] is not None and
+                        (row["dt"] - row["frozen_since"]).total_seconds() >= STALE_AFTER_S)
                     _cache["last"][row["unit"]] = row
                     _cache["rows"].append(row)
                     _cache["total"] += 1
