@@ -54,15 +54,19 @@ def main():
     CSV_PATH.parent.mkdir(exist_ok=True)
     migrate(CSV_PATH)
     print(f"Polling every {args.interval}s -> {CSV_PATH} (Ctrl+C to stop)")
+    last = {}  # previous quota payload per unit, for the stale flag
     while True:
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         for unit, sn in units.items():
             try:
-                sample = extract_sample(client.get_quota_all(sn))
+                quota = client.get_quota_all(sn)
+                sample = extract_sample(quota, last.get(unit))
+                last[unit] = quota
                 append_sample(CSV_PATH, now, unit, sample)
                 print(f"{now} {unit}: soc={sample['soc']}% solar={sample['solar_w']}W "
                       f"in={sample['watts_in']}W out={sample['watts_out']}W "
-                      f"ac_chg={sample['ac_charge_w']}W chg_state={sample['chg_state']}")
+                      f"ac_chg={sample['ac_charge_w']}W chg_state={sample['chg_state']}"
+                      f"{' STALE' if sample['stale'] else ''}")
             except Exception as e:  # keep polling through transient API errors
                 print(f"{now} {unit}: ERROR {e}")
         if args.once:

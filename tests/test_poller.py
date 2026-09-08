@@ -129,3 +129,16 @@ def test_extract_sample_pack_columns_absent_without_online_flags():
     sample = extract_sample({"bmsMaster.f32ShowSoc": 39.0, "bmsMaster.vol": 49292})
     assert sample["pack_main_soc"] is None
     assert sample["pack_main_mv"] is None
+
+
+def test_extract_sample_marks_stale_when_payload_repeats():
+    q = {"ems.f32LcdShowSoc": 50.0, "pd.wattsOutSum": 5}
+    assert extract_sample(q)["stale"] == 0
+    assert extract_sample(q, prev=None)["stale"] == 0
+    assert extract_sample(q, prev=dict(q))["stale"] == 1
+    assert extract_sample(q, prev={**q, "pd.wattsOutSum": 6})["stale"] == 0
+
+
+def test_fields_end_with_stale():
+    assert FIELDS[-1] == "stale"
+    assert HEADER[-1] == "stale"

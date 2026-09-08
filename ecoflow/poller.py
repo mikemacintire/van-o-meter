@@ -54,11 +54,12 @@ FIELDS = [
     "ac_out_enabled", "ac_out_w", "dc_out_w", "batt_temp",
     "cum_solar_wh", "cum_ac_in_wh", "cum_dc_in_wh", "cum_ac_out_wh", "cum_dc_out_wh",
     "pack_main_soc", "pack_extra_soc", "pack_main_mv", "pack_extra_mv",
+    "stale",
 ]
 HEADER = ["timestamp", "unit"] + FIELDS
 
 
-def extract_sample(quota):
+def extract_sample(quota, prev=None):
     sample = {}
     for key, (col, scale) in QUOTA_MAP.items():
         v = quota.get(key)
@@ -77,6 +78,10 @@ def extract_sample(quota):
         soc = quota.get(f"{prefix}.f32ShowSoc") if online else None
         sample[soc_col] = round(soc, 1) if soc is not None else None
         sample[mv_col] = quota.get(f"{prefix}.vol") if online else None
+    # 1 when the cloud handed back the exact payload it served last tick: the
+    # unit has dropped off WiFi and EcoFlow is replaying a cached snapshot with
+    # code 0 (A froze for 4 h twice on 2026-09-07). Same signal /api/live uses.
+    sample["stale"] = int(prev is not None and quota == prev)
     return sample
 
 
