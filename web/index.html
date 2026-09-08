@@ -573,6 +573,7 @@ h1 {
 .legend { display: flex; gap: 16px; font-size: var(--t-sm); color: var(--muted); flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
 .legend .ln { width: 16px; height: 2px; border-radius: 1px; vertical-align: 4px; }
+.legend .legend-note { color: var(--faint); margin-left: auto; }
 .tooltip {
   position: absolute; pointer-events: none; display: none; z-index: 5;
   background: var(--surface2); border: 1px solid var(--line2); border-radius: 10px;
@@ -1270,6 +1271,7 @@ review, the verdict, and DESIGN.md.
           <span><i style="background:var(--b)"></i>Solar B</span>
           <span><i class="ln" style="background:var(--load)"></i>House load</span>
           <span><i class="ln" style="background:var(--xfer)"></i>B→A transfer</span>
+          <span class="legend-note">dashed = counter average while the cloud link was frozen</span>
         </div>
       </div>
       <div class="chart-wrap" id="chartPower"></div>
@@ -1450,27 +1452,59 @@ function attachTooltip(wrap, svg, hit) {
   svg.addEventListener("touchend", hide);
 }
 
-/** Solar A + solar B stacked, house load as a line. Shared by several charts. */
+/** Solar A + solar B stacked, house load as a line. Shared by several charts.
+ *  null means the unit's cloud link was frozen and nothing bridged it: a gap,
+ *  never a zero. bridgedA/B mean the value is an average from the unit's energy
+ *  counters across such a freeze. A unit with no bucket at all at that time
+ *  contributes 0, as before. */
 function powerRows(hist) {
   const sa = hist.series.A, sb = hist.series.B;
   const t = sa.t.length >= sb.t.length ? sa.t : sb.t;
   if (!t || t.length < 2) return null;
+  const aAt = new Map(sa.t.map((tt, i) => [tt, i]));
   const bAt = new Map(sb.t.map((tt, i) => [tt, i]));
-  return t.map((tt, i) => {
-    const j = bAt.has(tt) ? bAt.get(tt) : -1;
-    const solA = sa.solar_w[i] ?? 0;
-    const solB = j >= 0 ? (sb.solar_w[j] ?? 0) : 0;
+  return t.map(tt => {
+    const i = aAt.has(tt) ? aAt.get(tt) : -1, j = bAt.has(tt) ? bAt.get(tt) : -1;
+    const solA = i < 0 ? 0 : sa.solar_w[i];
+    const solB = j < 0 ? 0 : sb.solar_w[j];
     // Load is what leaves the boxes: watts_out also counts A's internal
     // main->Extra pack transfer while charging (up to ~550 W), and B's AC
     // output is hard-wired into A's input — a transfer, not house load.
     // Old rows predate ac_out_w/dc_out_w; fall back to watts_out there.
-    const loadA = sa.ac_out_w[i] != null
-      ? sa.ac_out_w[i] + (sa.dc_out_w[i] ?? 0)
-      : (sa.watts_out[i] ?? 0);
-    const dcB = j >= 0 ? (sb.dc_out_w[j] ?? 0) : 0;
-    const xfer = j >= 0 ? (sb.ac_out_w[j] ?? 0) : 0;
-    return { t: tt, solA, solB, xfer, load: loadA + dcB };
+    const loadA = i < 0 ? 0
+      : sa.ac_out_w[i] != null ? sa.ac_out_w[i] + (sa.dc_out_w[i] ?? 0)
+      : sa.watts_out[i];
+    const dcB = j < 0 ? 0 : sb.dc_out_w[j];
+    const xfer = j < 0 ? 0 : sb.ac_out_w[j];
+    return {
+      t: tt, solA, solB, xfer,
+      load: loadA == null ? null : loadA + (dcB ?? 0),
+      gapA: i >= 0 && solA == null && loadA == null,
+      gapB: j >= 0 && solB == null && xfer == null,
+      bridgedA: i >= 0 && !!(sa.bridged && sa.bridged[i]),
+      bridgedB: j >= 0 && !!(sb.bridged && sb.bridged[j]),
+    };
   });
+}
+
+/** Split rows into drawable runs: a break wherever `val` is null, and a new
+ *  run (sharing its first point with the previous one, so the stroke stays
+ *  continuous) wherever `dashed` flips. */
+function strokeRuns(rows, val, dashed) {
+  const runs = [];
+  let cur = null;
+  rows.forEach(r => {
+    const v = val(r);
+    if (v == null) { cur = null; return; }
+    const d = !!dashed(r);
+    if (!cur || cur.dashed !== d) {
+      const prev = cur ? cur.pts[cur.pts.length - 1] : null;
+      cur = { dashed: d, pts: prev ? [prev] : [] };
+      runs.push(cur);
+    }
+    cur.pts.push({ r, v });
+  });
+  return runs;
 }
 
 /* ---------- power chart: stacked solar areas + load line ---------- */
@@ -1481,7 +1515,7 @@ function drawPower(wrap, hist, opts = {}) {
     return emptyNote(wrap, "Not enough samples yet",
       "The poller logs every 30 s — this fills in as data arrives.");
   }
-  const vMax = Math.max(...rows.map(r => Math.max(r.solA + r.solB, r.load, r.xfer)));
+  const vMax = Math.max(...rows.map(r => Math.max((r.solA ?? 0) + (r.solB ?? 0), r.load ?? 0, r.xfer ?? 0)));
   const [top, yTicks] = niceTop(vMax);
   const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
   const fmt = timeFmt(hist.range);
@@ -1495,16 +1529,24 @@ function drawPower(wrap, hist, opts = {}) {
   });
   const f = frame(W, H, top, yTicks, x, xLabels);
 
-  const area = (key, base) => {
-    const up = rows.map(r => `${x(r.t).toFixed(1)},${f.y(base(r) + r[key]).toFixed(1)}`);
-    const down = rows.map(r => `${x(r.t).toFixed(1)},${f.y(base(r)).toFixed(1)}`).reverse();
+  const P = (r, v) => `${x(r.t).toFixed(1)},${f.y(v).toFixed(1)}`;
+  const baseA = () => 0, baseB = r => r.solA ?? 0;
+  // fill only, broken at gaps; the top edge is stroked separately so a stretch
+  // bridged from the counters can be dashed while the stack underneath still
+  // shows the energy it carried
+  const area = (key, base) => strokeRuns(rows, r => r[key], () => false).map(run => {
+    const up = run.pts.map(p => P(p.r, base(p.r) + p.v));
+    const down = run.pts.map(p => P(p.r, base(p.r))).reverse();
     return `<polygon points="${up.concat(down).join(" ")}"/>`;
-  };
-  const loadLine = rows.map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)} ${f.y(r.load).toFixed(1)}`).join(" ");
+  }).join("");
+  // solid = sampled, dashed = counter average across a frozen cloud link
+  const stroke = (val, dashed, color, width, extra = "") =>
+    strokeRuns(rows, val, dashed).map(run =>
+      `<path d="${run.pts.map((p, i) => `${i ? "L" : "M"}${P(p.r, p.v).replace(",", " ")}`).join(" ")}"`
+      + ` fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round"`
+      + `${run.dashed ? ' stroke-dasharray="5 4"' : extra}/>`
+    ).join("");
   const hasXfer = rows.some(r => r.xfer > 1);
-  const xferLine = hasXfer
-    ? rows.map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)} ${f.y(r.xfer).toFixed(1)}`).join(" ")
-    : "";
 
   // each band fades toward its lower edge — lit at the top where the sun is,
   // so the stack reads as light landing on the roof rather than two paint slabs
@@ -1514,10 +1556,12 @@ function drawPower(wrap, hist, opts = {}) {
   wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="height:${H}px">
     <defs>${grad(gid + "A", C.A)}${grad(gid + "B", C.B)}</defs>
     ${f.grid}
-    <g fill="url(#${gid}A)" stroke="${C.A}" stroke-width="1" stroke-linejoin="round">${area("solA", () => 0)}</g>
-    <g fill="url(#${gid}B)" stroke="${C.B}" stroke-width="1" stroke-linejoin="round">${area("solB", r => r.solA)}</g>
-    ${hasXfer ? `<path d="${xferLine}" fill="none" stroke="${C.xfer}" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>` : ""}
-    <path d="${loadLine}" fill="none" stroke="${C.load}" stroke-width="2" stroke-linejoin="round"/>
+    <g fill="url(#${gid}A)">${area("solA", baseA)}</g>
+    <g fill="url(#${gid}B)">${area("solB", baseB)}</g>
+    ${stroke(r => r.solA, r => r.bridgedA, C.A, 1)}
+    ${stroke(r => r.solB == null ? null : baseB(r) + r.solB, r => r.bridgedB, C.B, 1)}
+    ${hasXfer ? stroke(r => r.xfer, r => r.bridgedB, C.xfer, 2, ' stroke-dasharray="5 4"') : ""}
+    ${stroke(r => r.load, r => r.bridgedA, C.load, 2)}
     <line class="xhair" x1="0" x2="0" y1="12" y2="${H - 26}" stroke="var(--line2)" visibility="hidden"/>
   </svg><div class="tooltip"></div>`;
 
@@ -1525,17 +1569,22 @@ function drawPower(wrap, hist, opts = {}) {
   attachTooltip(wrap, svg, mx => {
     let best = rows[0];
     for (const r of rows) if (Math.abs(x(r.t) - mx) < Math.abs(x(best.t) - mx)) best = r;
-    const net = best.solA + best.solB - best.load;
+    const known = best.solA != null && best.solB != null && best.load != null;
+    const net = known ? best.solA + best.solB - best.load : null;
+    const val = (v, bridged) => v == null ? "<b>no data</b>"
+      : `<b>${Math.round(v)} W</b>${bridged ? ' <span style="color:var(--faint)">avg</span>' : ""}`;
     return {
       x: x(best.t),
       html: `<div class="tt-t">${new Date(best.t).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>`
-        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar A <b>${Math.round(best.solA)} W</b></div>`
-        + `<div class="tt-row"><i style="background:${C.B}"></i>Solar B <b>${Math.round(best.solB)} W</b></div>`
-        + `<div class="tt-row"><i style="background:${C.load}"></i>Load <b>${Math.round(best.load)} W</b></div>`
-        + (best.xfer > 1 ? `<div class="tt-row"><i style="background:${C.xfer}"></i>B→A transfer <b>${Math.round(best.xfer)} W</b></div>` : "")
+        + `<div class="tt-row"><i style="background:${C.A}"></i>Solar A ${val(best.solA, best.bridgedA)}</div>`
+        + `<div class="tt-row"><i style="background:${C.B}"></i>Solar B ${val(best.solB, best.bridgedB)}</div>`
+        + `<div class="tt-row"><i style="background:${C.load}"></i>Load ${val(best.load, best.bridgedA)}</div>`
+        + (best.xfer > 1 ? `<div class="tt-row"><i style="background:${C.xfer}"></i>B→A transfer ${val(best.xfer, best.bridgedB)}</div>` : "")
         + `<div class="tt-row" style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px">`
-        + `<span style="color:var(--faint)">Net</span><b style="color:${net >= 0 ? css("--good") : css("--warn")}">`
-        + `${net >= 0 ? "+" : "−"}${Math.abs(Math.round(net))} W</b></div>`,
+        + `<span style="color:var(--faint)">Net</span>`
+        + (net == null ? "<b>—</b>"
+          : `<b style="color:${net >= 0 ? css("--good") : css("--warn")}">${net >= 0 ? "+" : "−"}${Math.abs(Math.round(net))} W</b>`)
+        + `</div>`,
     };
   });
 }
@@ -1543,11 +1592,15 @@ function drawPower(wrap, hist, opts = {}) {
 /* ---------- SOC chart ---------- */
 function drawSoc(wrap, hist, opts = {}) {
   const { W, H } = chartBox(wrap, opts.height || 250, opts.fill);
-  const pts = {};
+  const pts = {}, runs = {};
   let any = false;
   for (const u of ["A", "B"]) {
     const s = hist.series[u];
-    pts[u] = s.t.map((t, i) => ({ t, v: s.soc[i] })).filter(p => p.v != null);
+    // a null bucket is a frozen cloud link: the line breaks there and a dotted
+    // straight segment joins the last real reading to the next one
+    const all = s.t.map((t, i) => ({ t, v: s.soc[i] }));
+    pts[u] = all.filter(p => p.v != null);               // tooltip + extents
+    runs[u] = strokeRuns(all, p => p.v, () => false).map(r => r.pts.map(p => p.r));
     if (pts[u].length) any = true;
   }
   if (!any) return emptyNote(wrap, "No state-of-charge samples yet", "Give the poller a few minutes.");
@@ -1571,14 +1624,24 @@ function drawSoc(wrap, hist, opts = {}) {
   const gid = wrap.id + "-g", y0 = f.y(0);
   for (const u of ["A", "B"]) {
     if (!pts[u].length) continue;
-    const d = pts[u].map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${f.y(p.v).toFixed(1)}`).join(" ");
-    const last = pts[u][pts[u].length - 1], first = pts[u][0];
+    const path = ps => ps.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)} ${f.y(p.v).toFixed(1)}`).join(" ");
+    const last = pts[u][pts[u].length - 1];
     // a soft fill under each line, fading to nothing at the floor: the stored
     // charge reads as a volume, not a wire, from across the box
     defs += `<linearGradient id="${gid}${u}" gradientUnits="userSpaceOnUse" x1="0" y1="${f.T}" x2="0" y2="${y0.toFixed(1)}">
       <stop offset="0" stop-color="${col[u]}" stop-opacity=".2"/><stop offset="1" stop-color="${col[u]}" stop-opacity="0"/></linearGradient>`;
-    fills += `<path d="${d} L${x(last.t).toFixed(1)} ${y0.toFixed(1)} L${x(first.t).toFixed(1)} ${y0.toFixed(1)} Z" fill="url(#${gid}${u})"/>`;
-    lines += `<path d="${d}" fill="none" stroke="${col[u]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    // the fill is the volume of stored charge, so it runs straight across a
+    // gap like the dotted bridge does; only the line itself breaks there
+    const first = pts[u][0];
+    fills += `<path d="${path(pts[u])} L${x(last.t).toFixed(1)} ${y0.toFixed(1)} L${x(first.t).toFixed(1)} ${y0.toFixed(1)} Z" fill="url(#${gid}${u})"/>`;
+    runs[u].forEach((ps, k) => {
+      const z = ps[ps.length - 1];
+      lines += `<path d="${path(ps)}" fill="none" stroke="${col[u]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+      // across a frozen span a straight line is the honest guess: far closer
+      // to the truth than the plateau-and-cliff the raw log would draw
+      const next = runs[u][k + 1];
+      if (next) lines += `<path d="${path([z, next[0]])}" fill="none" stroke="${col[u]}" stroke-width="2" stroke-dasharray="2 4" stroke-linecap="round"/>`;
+    });
     ends += `<circle cx="${x(last.t).toFixed(1)}" cy="${f.y(last.v).toFixed(1)}" r="3.5" fill="${col[u]}" stroke="var(--surface)" stroke-width="2"/>`;
     endPts.push({ u, x: x(last.t), y: f.y(last.v) });
   }
