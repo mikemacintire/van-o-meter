@@ -368,3 +368,89 @@ def test_load_rows_keeps_logged_stale_flag(tmp_path):
     base = [_ts(), "A", 39.0] + [0] * (len(HEADER) - 4)
     _write(p, HEADER, [base + [0], [_ts(30)] + base[1:] + [1]])
     assert [r["stale"] for r in load_rows(p)] == [0, 1]
+
+
+def test_bucket_series_skips_stale_rows_and_emits_none_buckets(t0):
+    rows = [
+        row(t0, solar_w=100, soc=50),
+        row(t0 + timedelta(minutes=1), solar_w=900, soc=99, stale=1),
+        row(t0 + timedelta(minutes=6), solar_w=900, soc=99, stale=1),
+    ]
+    out = bucket_series(rows, "A", t0 - timedelta(hours=1), 300, ["solar_w", "soc"])
+    assert out["solar_w"] == [100, None]
+    assert out["soc"] == [50, None]
+    assert out["bridged"] == [False, False]
+
+
+def test_summarize_ignores_stale_rows(t0):
+    rows = [row(t0, ac_out_w=10, soc=50, solar_w=100),
+            row(t0 + timedelta(minutes=1), ac_out_w=900, soc=99, solar_w=999, stale=1)]
+    s = summarize(rows, "A", t0 - timedelta(hours=1))
+    assert s["samples"] == 2
+    assert s["ac_duty_pct"] == 0 and s["soc_max"] == 50 and s["peak_solar_w"] == 100
+
+
+def test_hourly_profile_ignores_stale_rows(t0):
+    rows = [row(t0, solar_w=100, ac_out_w=10, dc_out_w=0),
+            row(t0 + timedelta(minutes=1), solar_w=900, ac_out_w=900, dc_out_w=0, stale=1)]
+    prof = hourly_profile(rows, "A", t0 - timedelta(hours=1))
+    assert prof[t0.hour]["solar_w"] == 100 and prof[t0.hour]["load_w"] == 10
+
+
+def test_avg_daily_drain_soc_endpoints_skip_stale_rows(t0):
+    # A and B each drop 10 % of 1000 Wh over 3 days with no inflow -> 200 Wh / 3 d
+    rows = []
+    for u in ("A", "B"):
+        rows += [row(t0, unit=u, soc=60, cum_solar_wh=0, cum_ac_in_wh=0, cum_ac_out_wh=0),
+                 row(t0 + timedelta(days=3), unit=u, soc=50,
+                     cum_solar_wh=0, cum_ac_in_wh=0, cum_ac_out_wh=0),
+                 row(t0 + timedelta(days=3, hours=1), unit=u, soc=1, stale=1,
+                     cum_solar_wh=0, cum_ac_in_wh=0, cum_ac_out_wh=0)]
+    d = avg_daily_drain(rows, {"A": 1000, "B": 1000}, now=t0 + timedelta(days=4))
+    assert round(d["wh_per_day"], 1) == round(200 / 3, 1)
+
+
+def test_bucket_series_bridges_a_gap_from_counters(t0):
+    # fresh at t0 and t0+20 min; two all-stale buckets between. The AC counter
+    # moved 100 Wh over 20 min -> 300 W average, whatever the frozen watts said.
+    rows = [
+        row(t0, solar_w=50, ac_out_w=0, dc_out_w=0, soc=50,
+            cum_solar_wh=1000, cum_ac_out_wh=500, cum_dc_out_wh=10),
+        row(t0 + timedelta(minutes=6), solar_w=50, ac_out_w=0, dc_out_w=0, soc=50, stale=1,
+            cum_solar_wh=1000, cum_ac_out_wh=500, cum_dc_out_wh=10),
+        row(t0 + timedelta(minutes=11), solar_w=50, ac_out_w=0, dc_out_w=0, soc=50, stale=1,
+            cum_solar_wh=1000, cum_ac_out_wh=500, cum_dc_out_wh=10),
+        row(t0 + timedelta(minutes=20), solar_w=50, ac_out_w=0, dc_out_w=0, soc=40,
+            cum_solar_wh=1000, cum_ac_out_wh=600, cum_dc_out_wh=20),
+    ]
+    out = bucket_series(rows, "A", t0 - timedelta(hours=1), 300,
+                        ["solar_w", "ac_out_w", "dc_out_w", "watts_out", "soc"])
+    assert out["bridged"] == [False, True, True, False]
+    assert out["ac_out_w"] == [0, 300, 300, 0]
+    assert out["dc_out_w"] == [0, 30, 30, 0]
+    assert out["watts_out"][1] == 330
+    assert out["solar_w"] == [50, 0, 0, 50]
+    assert out["soc"] == [50, None, None, 40]
+
+
+def test_bucket_series_leaves_open_ended_gap_unbridged(t0):
+    rows = [row(t0, ac_out_w=0, cum_ac_out_wh=500),
+            row(t0 + timedelta(minutes=6), ac_out_w=0, cum_ac_out_wh=500, stale=1)]
+    out = bucket_series(rows, "A", t0 - timedelta(hours=1), 300, ["ac_out_w"])
+    assert out["ac_out_w"] == [0, None] and out["bridged"] == [False, False]
+
+
+def test_bucket_series_skips_bridge_across_counter_reset(t0):
+    rows = [row(t0, ac_out_w=0, cum_ac_out_wh=500),
+            row(t0 + timedelta(minutes=6), ac_out_w=0, cum_ac_out_wh=500, stale=1),
+            row(t0 + timedelta(minutes=12), ac_out_w=0, cum_ac_out_wh=3)]
+    out = bucket_series(rows, "A", t0 - timedelta(hours=1), 300, ["ac_out_w"])
+    assert out["ac_out_w"][1] is None and out["bridged"][1] is False
+
+
+def test_bucket_series_bridges_from_a_fresh_row_before_the_range(t0):
+    rows = [row(t0 - timedelta(minutes=10), ac_out_w=0, cum_ac_out_wh=500),
+            row(t0 + timedelta(minutes=1), ac_out_w=0, cum_ac_out_wh=500, stale=1),
+            row(t0 + timedelta(minutes=20), ac_out_w=0, cum_ac_out_wh=550)]
+    out = bucket_series(rows, "A", t0, 300, ["ac_out_w"])
+    assert out["ac_out_w"][0] == 100 and out["bridged"][0] is True

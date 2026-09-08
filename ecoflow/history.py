@@ -8,6 +8,7 @@ sampling gaps and poller restarts.
 Day boundaries use *local* time: a solar day should line up with Mike's day.
 """
 
+import bisect
 import csv
 import threading
 from datetime import datetime, timedelta
@@ -28,6 +29,17 @@ ENERGY = {
     "cum_dc_out_wh": "dc_out_wh",
 }
 AC_ON_W = 50  # inverter output above this counts as "the A/C is running"
+# bucket metric -> the lifetime counter(s) whose delta, divided by elapsed
+# hours, stands in for it across a span the cloud spent replaying a frozen
+# snapshot. The counters live on the unit and keep integrating through the
+# outage, so the energy is exact even though its timing is not.
+BRIDGE = {
+    "solar_w": ("cum_solar_wh",),
+    "ac_out_w": ("cum_ac_out_wh",),
+    "dc_out_w": ("cum_dc_out_wh",),
+    "ac_charge_w": ("cum_ac_in_wh",),
+    "watts_out": ("cum_ac_out_wh", "cum_dc_out_wh"),
+}
 # In-memory cap: the longest dashboard range is 30d, and the row cache costs
 # ~1 KB/row (~65 MB after ten days of 30 s samples) in a process that runs for
 # weeks. The CSV keeps everything; a full reparse restores any pruned span.
@@ -159,21 +171,74 @@ def _mean(vals):
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
+def _fresh(row):
+    """A row the unit actually reported, not a replayed frozen snapshot."""
+    return not row.get("stale")
+
+
 def bucket_series(rows, unit, since, bucket_s, metrics):
-    """Downsample to fixed-width buckets: mean of each metric, last SOC."""
+    """Downsample to fixed-width buckets: mean of each metric, last SOC.
+
+    Stale rows never feed a mean. A bucket with no fresh row is still emitted,
+    with None everywhere, so the chart shows a gap instead of a straight line
+    across the outage; `_bridge` then fills its power metrics from the
+    counters where it can and marks those buckets in `bridged`.
+    """
+    unit_rows = [r for r in rows if r["unit"] == unit]
     buckets = {}
-    for row in rows:
-        if row["unit"] != unit or row["dt"] < since:
+    for row in unit_rows:
+        if row["dt"] < since:
             continue
-        key = int(row["dt"].timestamp() // bucket_s)
-        buckets.setdefault(key, []).append(row)
-    out = {"t": [], **{m: [] for m in metrics}}
-    for key in sorted(buckets):
-        group = buckets[key]
+        buckets.setdefault(int(row["dt"].timestamp() // bucket_s), []).append(row)
+    keys = sorted(buckets)
+    out = {"t": [], "bridged": [], **{m: [] for m in metrics}}
+    empty = []
+    for key in keys:
+        group = [g for g in buckets[key] if _fresh(g)]
         out["t"].append(int(key * bucket_s * 1000))  # ms for JS
+        out["bridged"].append(False)
+        empty.append(not group)
         for m in metrics:
-            out[m].append(group[-1][m] if m == "soc" else _mean([g[m] for g in group]))
+            out[m].append(None if not group
+                          else group[-1][m] if m == "soc" else _mean([g[m] for g in group]))
+    _bridge(out, keys, empty, bucket_s, unit_rows, metrics)
     return out
+
+
+def _bridge(out, keys, empty, bucket_s, unit_rows, metrics):
+    """Fill runs of empty buckets with counter rates from the bounding fresh rows.
+
+    SOC has no counter and stays None. An open-ended run (the unit is frozen
+    right now) and a counter that went backwards (reset) are left alone.
+    """
+    fresh = [r for r in unit_rows if _fresh(r)]
+    times = [r["dt"] for r in fresh]
+    i = 0
+    while i < len(keys):
+        if not empty[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(keys) and empty[j + 1]:
+            j += 1
+        start = datetime.fromtimestamp(keys[i] * bucket_s).astimezone()
+        end = datetime.fromtimestamp((keys[j] + 1) * bucket_s).astimezone()
+        b = bisect.bisect_left(times, start) - 1
+        a = bisect.bisect_left(times, end)
+        if b >= 0 and a < len(fresh):
+            before, after = fresh[b], fresh[a]
+            hours = (after["dt"] - before["dt"]).total_seconds() / 3600
+            for m in metrics:
+                if m not in BRIDGE or hours <= 0:
+                    continue
+                deltas = [(after.get(c), before.get(c)) for c in BRIDGE[m]]
+                if any(x is None or y is None or x < y for x, y in deltas):
+                    continue
+                rate = round(sum(x - y for x, y in deltas) / hours, 1)
+                for k in range(i, j + 1):
+                    out[m][k] = rate
+                    out["bridged"][k] = True
+        i = j + 1
 
 
 def daily_energy(rows, unit, days, now=None):
@@ -247,7 +312,7 @@ def avg_daily_drain(rows, wh_full, now=None):
     stored_start = stored_end = 0.0
     first_dt, last_dt = None, None
     for unit, cap in wh_full.items():
-        socs = [r for r in scoped[unit] if r["soc"] is not None]
+        socs = [r for r in scoped[unit] if r["soc"] is not None and _fresh(r)]
         if len(socs) < 2 or (socs[-1]["dt"] - socs[0]["dt"]).total_seconds() < DRAIN_MIN_SPAN_S:
             return None
         stored_start += socs[0]["soc"] / 100 * cap
@@ -272,12 +337,13 @@ def summarize(rows, unit, since):
     scoped = [r for r in rows if r["unit"] == unit and r["dt"] >= since]
     if not scoped:
         return None
+    fresh = [r for r in scoped if _fresh(r)]   # `samples` still describes the log
     # ac_out_w was added to the log later than the other columns, so the duty
     # cycle covers a shorter window than the range — report that window too.
-    ac_rows = [r for r in scoped if r["ac_out_w"] is not None]
+    ac_rows = [r for r in fresh if r["ac_out_w"] is not None]
     ac_samples = [r["ac_out_w"] for r in ac_rows]
-    solar = [(r["solar_w"], r["dt"]) for r in scoped if r["solar_w"] is not None]
-    socs = [r["soc"] for r in scoped if r["soc"] is not None]
+    solar = [(r["solar_w"], r["dt"]) for r in fresh if r["solar_w"] is not None]
+    socs = [r["soc"] for r in fresh if r["soc"] is not None]
     peak_solar, peak_at = max(solar, default=(None, None))
     return {
         "samples": len(scoped),
@@ -305,7 +371,7 @@ def hourly_profile(rows, unit, since):
     """
     by_hour = {h: {"solar": [], "load": [], "ac": []} for h in range(24)}
     for row in rows:
-        if row["unit"] != unit or row["dt"] < since:
+        if row["unit"] != unit or row["dt"] < since or not _fresh(row):
             continue
         slot = by_hour[row["dt"].hour]
         slot["solar"].append(row["solar_w"])

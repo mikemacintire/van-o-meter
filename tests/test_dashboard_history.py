@@ -38,3 +38,13 @@ def test_history_payload_includes_drain(monkeypatch):
 
 def test_history_drain_null_when_insufficient(monkeypatch):
     assert _payload(monkeypatch, [])["drain"] is None
+
+
+def test_history_payload_series_carry_bridged_flags(monkeypatch):
+    now = datetime.now().astimezone()
+    rows = [_row(now - timedelta(minutes=10), "A", soc=50, ac_out_w=0, cum_ac_out_wh=100),
+            _row(now - timedelta(minutes=5), "A", soc=50, ac_out_w=0, cum_ac_out_wh=100, stale=1),
+            _row(now, "A", soc=49, ac_out_w=0, cum_ac_out_wh=150)]
+    payload = _payload(monkeypatch, rows)
+    a = payload["series"]["A"]
+    assert len(a["bridged"]) == len(a["t"]) and True in a["bridged"]
