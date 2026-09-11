@@ -621,6 +621,14 @@ def truck():
     return send_file(ROOT / "web" / "truck.png")
 
 
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon():
+    """iOS home-screen icon. Safari ignores SVG and data-URI icons for "Add to Home
+    Screen", so the inline favicon isn't enough — it needs a real 180 px PNG, and it
+    probes this exact root path even without a <link>."""
+    return send_file(ROOT / "web" / "apple-touch-icon.png", max_age=86400)
+
+
 @app.get("/assets/<path:name>")
 def assets(name: str):
     """Fonts and other local assets. Self-hosted because the truck is off-grid — a
